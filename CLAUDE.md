@@ -184,6 +184,7 @@ level(t) = (h₁+h₂)/2 + (h₁-h₂)/2 · cos(πτ)
 - localStorage/sessionStorage 사용 (Capacitor Preferences/Filesystem 사용)
 - 조과 로그 기능 추가 (사용자가 명시적으로 제외 요청함)
 - KHOA·NIFS·법령 인증키를 앱에서 직접 사용 (APK 디컴파일 시 그대로 노출)
+- 위치 권한 추가 (GPS 최근접 선택은 만들었다가 제거했다 — ANDROID.md 6-2)
 - `android/` 디렉터리를 커밋 (CI 생성물과 이중 관리가 되어 어긋난다)
 - `www/index.html`을 앱용·웹용으로 포크
 - 캐시에서 꺼낸 값에 신선도 검사를 건너뛰기 (오프라인은 면제부가 아니다)

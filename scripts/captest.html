@@ -35,13 +35,7 @@ window.Capacitor = {
     App:       { getInfo: async () => ({version:'9.9.9'}), addListener(){} },
     StatusBar: { setBackgroundColor: async()=>{}, setStyle: async()=>{} },
     SplashScreen: { hide: async () => { window.__splashHidden = true; } },
-    Geolocation: {
-      checkPermissions:   async () => ({location:'granted'}),
-      requestPermissions: async () => ({location:'granted'}),
-      // 포항 구룡포 근처
-      getCurrentPosition: async () => ({coords:{latitude:35.99, longitude:129.55}})
-    }
-  }
+}
 };
 </script>
 <script>

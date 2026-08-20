@@ -1121,107 +1121,27 @@ document.getElementById('hour').addEventListener('input', e=>{ S.hour=+e.target.
 
 /* 화면 꺼짐 방지. Screen Wake Lock 은 WebView 표준이라 플러그인이 필요 없고
    웹에서도 그대로 동작한다. 화면이 가려지면 OS 가 자동 해제하므로 복귀 시 재획득. */
-const KEEP = { on:true, lock:null };
+const KEEP = { on:true, lock:null, failed:false };
 async function applyKeepAwake(){
-  if(!('wakeLock' in navigator)) return;
+  if(!('wakeLock' in navigator)){ KEEP.failed = true; drawToolbar(); return; }
   try{
     if(KEEP.on && !KEEP.lock && document.visibilityState === 'visible'){
       KEEP.lock = await navigator.wakeLock.request('screen');
-      KEEP.lock.addEventListener('release', ()=>{ KEEP.lock = null; });
+      KEEP.failed = false;
+      KEEP.lock.addEventListener('release', ()=>{ KEEP.lock = null; drawToolbar(); });
     }else if(!KEEP.on && KEEP.lock){
-      await KEEP.lock.release(); KEEP.lock = null;
+      await KEEP.lock.release(); KEEP.lock = null; KEEP.failed = false;
     }
-  }catch(e){ /* 절전 모드 등에서 거부될 수 있다 — 무시 */ }
+  }catch(e){
+    // 절전 모드 등에서 거부될 수 있다. 화면이 가려져 아직 시도조차 못 한 것과
+    // 시도했다가 거부당한 것은 다르다 — 후자만 '불가'로 표시한다.
+    KEEP.failed = true;
+  }
+  drawToolbar();          // 실제 락 상태를 버튼에 반영
 }
 document.addEventListener('visibilitychange', ()=>{
   if(document.visibilityState === 'visible') applyKeepAwake();
 });
-
-/* GPS 최근접 포인트. 30km 넘게 떨어져 있으면 고르지 않고 사용자가 정하게 둔다.
-   권한을 거부해도 앱은 그대로 동작해야 한다.                                  */
-const GEO = { state:'idle', label:'' };
-const kmBetween = (a,b) =>
-  Math.hypot((a.lat-b.lat)*111, (a.lon-b.lon)*111*Math.cos(a.lat*Math.PI/180));
-
-const coords = p => ({lat:p.coords.latitude, lon:p.coords.longitude});
-
-/* WebView 표준 경로. OS 권한만 있으면 동작하고, 정밀/대략 어느 쪽이든 받는다. */
-function webPos(hi){
-  return new Promise((res, rej) => {
-    if(!navigator.geolocation) return rej(new Error('no geolocation'));
-    navigator.geolocation.getCurrentPosition(
-      p => res(coords(p)), rej,
-      {enableHighAccuracy:!!hi, timeout:hi ? 15000 : 9000, maximumAge:300000});
-  });
-}
-
-async function currentPos(){
-  if(!(NATIVE && CAP.Geolocation)) return await webPos(false);
-
-  /* 1) 권한. 'location'(정밀+대략)으로 청한다 — Android 12+ 는 대화상자에서
-        사용자가 '대략적인 위치'를 고를 수 있으므로 선택권은 그대로 남는다. */
-  let perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
-  const granted = p => p && (p.location === 'granted' || p.coarseLocation === 'granted');
-  if(!granted(perm)){
-    perm = await CAP.Geolocation.requestPermissions({permissions:['location']})
-                .catch(()=> CAP.Geolocation.requestPermissions({permissions:['coarseLocation']})
-                                .catch(()=>null));
-  }
-  if(!granted(perm)){
-    const e = new Error('permission denied'); e.kind = 'denied'; throw e;
-  }
-
-  /* 2) 좌표 획득. 권한이 있어도 실패하는 경우가 많아 네 가지를 차례로 시도한다.
-        enableHighAccuracy:false 는 NETWORK 프로바이더를 쓰는데 요즘 기기엔
-        아예 없는 경우가 있고, 그러면 대략 위치 요청이 통째로 실패한다.
-        정밀 쪽과 WebView 경로까지 훑어야 실제로 잡힌다. */
-  const attempts = [
-    ['plugin/coarse', () => CAP.Geolocation.getCurrentPosition(
-        {enableHighAccuracy:false, timeout:9000,  maximumAge:300000}).then(coords)],
-    ['plugin/fine',   () => CAP.Geolocation.getCurrentPosition(
-        {enableHighAccuracy:true,  timeout:15000, maximumAge:300000}).then(coords)],
-    ['web/coarse',    () => webPos(false)],
-    ['web/fine',      () => webPos(true)]
-  ];
-  let last = 'unknown';
-  for(const [tag, go] of attempts){
-    try{ return await go(); }
-    catch(err){ last = `${tag}: ${(err && err.message) || err}`; }
-  }
-  const e = new Error(last); e.kind = 'fail'; throw e;   // 원인을 그대로 들고 나간다
-}
-
-async function locateNearest(auto){
-  GEO.state = 'busy'; drawToolbar();
-  try{
-    const me = await currentPos();
-    let best = null, bd = 1e9;
-    for(const p of POINTS){ const d = kmBetween(me, p); if(d < bd){ bd = d; best = p; } }
-    if(!best){
-      GEO.state = 'error'; GEO.label = '포인트 없음';
-    }else if(auto && bd > 30){
-      // 부팅 시 자동 선택은 30km 안쪽일 때만 한다. 멀리 있는데 선택을 가로채면
-      // 보고 있던 포인트가 이유 없이 바뀐다.
-      GEO.state = 'far';
-      GEO.label = `${best.name} ${Math.round(bd)}km`;
-    }else{
-      // 직접 누른 것은 명시적 의사표시다. 멀어도 그 포인트로 옮긴다 —
-      // 거리만 알려주고 아무것도 안 하면 버튼이 고장난 것처럼 보인다.
-      S.pt = best.id;
-      if(S.mode === 'region') S.sea = best.sea;
-      GEO.state = 'ok';
-      GEO.label = `${best.name} ${bd < 1 ? '<1' : Math.round(bd)}km`;
-      render();
-    }
-  }catch(e){
-    // 모든 실패를 '거부됨'으로 뭉뚱그리면 원인을 영영 못 찾는다.
-    // 권한 문제와 좌표 획득 실패는 대처가 완전히 다르다.
-    if(auto){ GEO.state = 'idle'; }
-    else if(e && e.kind === 'denied'){ GEO.state = 'denied'; GEO.label = ''; }
-    else { GEO.state = 'error'; GEO.label = String((e && e.message) || 'unknown'); }
-  }
-  drawToolbar();
-}
 
 /* 사이드로딩이라 자동 업데이트가 없다. 새 버전이 있다는 사실만 알리고
    설치는 사용자가 한다. 자동 업데이터는 개인용 앱에 과잉이다. */
@@ -1254,19 +1174,15 @@ function drawToolbar(){
   const el = document.getElementById('toolbar');
   if(!NATIVE){ el.hidden = true; return; }
   el.hidden = false;
-  const geoTxt = GEO.state === 'busy'   ? '위치 확인중'
-               : GEO.state === 'ok'     ? GEO.label
-               : GEO.state === 'far'    ? `30km 밖 · ${GEO.label}`
-               : GEO.state === 'denied' ? '위치 거부됨 · 설정에서 허용'
-               : GEO.state === 'error'  ? `위치 실패 · ${GEO.label.slice(0, 30)}`
-               : '내 위치';
+  // 켰다고 표시했는데 실제로 락을 못 잡은 경우가 있다(절전 모드 등).
+  // 설정값이 아니라 실제 상태를 말해야 한다.
+  const keepTxt = !KEEP.on ? 'OFF' : (KEEP.failed && !KEEP.lock) ? '불가' : 'ON';
   const ver = VER.latest
     ? `<a class="tver up" href="${VER.url}" target="_blank" rel="noopener">v${VER.current} → v${VER.latest}</a>`
     : `<span class="tver">v${VER.current}${VER.build ? ` (${VER.build})` : ''}</span>`;
   el.innerHTML =
-      `<button class="tbtn" id="btn-geo"${GEO.state === 'busy' ? ' disabled' : ''}`
-    + `${GEO.state === 'error' ? ` title="${GEO.label.replace(/"/g, '')}"` : ''}>◎ ${geoTxt}</button>`
-    + `<button class="tbtn" id="btn-keep" aria-pressed="${KEEP.on}">화면유지 ${KEEP.on ? 'ON' : 'OFF'}</button>`
+      `<button class="tbtn" id="btn-keep" aria-pressed="${KEEP.on && !!KEEP.lock}">`
+    + `화면유지 ${keepTxt}</button>`
     + ver;
 }
 
@@ -1279,8 +1195,7 @@ function drawOffbar(){
 }
 
 document.getElementById('toolbar').addEventListener('click', e=>{
-  if(e.target.closest('#btn-geo')) locateNearest(false);
-  else if(e.target.closest('#btn-keep')){
+  if(e.target.closest('#btn-keep')){
     KEEP.on = !KEEP.on;
     Store.set(K.keep, KEEP.on);
     applyKeepAwake(); drawToolbar();
@@ -1320,10 +1235,7 @@ async function boot(){
   }
   drawOffbar();
 
-  if(NATIVE){                      // 3. 부수 기능 — 실패해도 앱에 영향 없음
-    locateNearest(true);
-    checkUpdate();
-  }
+  if(NATIVE) checkUpdate();        // 3. 부수 기능 — 실패해도 앱에 영향 없음
 }
 boot();
 

@@ -1,0 +1,63 @@
+<!DOCTYPE html><html lang="ko"><head><meta charset="utf-8"><title>native harness — 워킹 조건</title></head><body>
+<script>
+/* 네이티브 경로(NATIVE=true)를 브라우저에서 그대로 태워 보기 위한 임시 하네스.
+   Capacitor 플러그인을 메모리 스텁으로 흉내 낸다. 저장소 루트에서 정적 서버를 띄우고
+   /scripts/captest.html 로 연다. ?reset=1 초기화, ?offline=1 오프라인 2회차. */
+// 재실행(2회차 부팅)을 흉내 내려면 스토어가 리로드를 넘어 살아야 한다.
+// 하네스 전용이며 앱 코드는 sessionStorage 를 쓰지 않는다.
+const HS = k => { try { return JSON.parse(sessionStorage.getItem(k)) || {}; } catch(e) { return {}; } };
+const HSAVE = () => { sessionStorage.setItem('__prefs', JSON.stringify(window.__prefs));
+                      sessionStorage.setItem('__files', JSON.stringify(window.__files)); };
+window.__prefs = HS('__prefs');
+window.__files = HS('__files');
+window.__offline = new URLSearchParams(location.search).has('offline');
+if (new URLSearchParams(location.search).has('reset')) {
+  sessionStorage.clear(); window.__prefs = {}; window.__files = {};
+}
+window.Capacitor = {
+  isNativePlatform: () => true,
+  Plugins: {
+    Preferences: {
+      get:    async ({key}) => ({ value: window.__prefs[key] ?? null }),
+      set:    async ({key, value}) => { window.__prefs[key] = value; HSAVE(); },
+      remove: async ({key}) => { delete window.__prefs[key]; }
+    },
+    Filesystem: {
+      readFile:   async ({path}) => {
+        if (!(path in window.__files)) throw new Error('ENOENT ' + path);
+        return { data: window.__files[path] };
+      },
+      writeFile:  async ({path, data}) => { window.__files[path] = data; HSAVE(); },
+      readdir:    async () => ({ files: Object.keys(window.__files).map(n => ({name:n})) }),
+      deleteFile: async ({path}) => { delete window.__files[path]; HSAVE(); }
+    },
+    Network:   { getStatus: async () => ({connected: !window.__offline}), addListener(){} },
+    App:       { getInfo: async () => ({version:'9.9.9'}), addListener(){} },
+    StatusBar: { setBackgroundColor: async()=>{}, setStyle: async()=>{} },
+    SplashScreen: { hide: async () => { window.__splashHidden = true; } },
+    Geolocation: {
+      checkPermissions:   async () => ({location:'granted'}),
+      requestPermissions: async () => ({location:'granted'}),
+      // 포항 구룡포 근처
+      getCurrentPosition: async () => ({coords:{latitude:35.99, longitude:129.55}})
+    }
+  }
+};
+</script>
+<script>
+(async () => {
+  const html = await (await fetch('../www/index.html')).text();
+  // 스텁이 앱 스크립트보다 먼저 살아 있어야 하므로 body 안쪽만 이어 붙인다
+  const body = html.slice(html.indexOf('<body>') + 6, html.lastIndexOf('</body>'));
+  const head = html.slice(html.indexOf('<style>'), html.indexOf('</style>') + 8);
+  document.head.insertAdjacentHTML('beforeend', head);
+  document.body.insertAdjacentHTML('beforeend', body.replace(/<script>/g, '<script data-app>'));
+  // insertAdjacentHTML 은 script 를 실행하지 않는다 → 수동으로 되살린다
+  for (const old of document.querySelectorAll('script[data-app]')) {
+    const s = document.createElement('script');
+    s.textContent = old.textContent;
+    old.replaceWith(s);
+  }
+})();
+</script>
+</body></html>

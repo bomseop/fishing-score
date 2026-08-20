@@ -1,0 +1,33 @@
+{
+  "name": "shorefishing-condition",
+  "version": "1.0.0",
+  "description": "연안 워킹 낚시 조건 적합도 스코어 — Capacitor Android 셸",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "fonts": "node scripts/bundle-fonts.mjs",
+    "assets:src": "python scripts/make_assets.py",
+    "prepare:android": "npm run fonts && npx cap add android --confirm || true",
+    "patch:android": "node scripts/patch-android.mjs",
+    "sync": "npm run fonts && npx cap sync android && npm run patch:android",
+    "build:debug": "npm run sync && cd android && ./gradlew assembleDebug",
+    "build:release": "npm run sync && cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/app": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/filesystem": "^7.0.0",
+    "@capacitor/geolocation": "^7.0.0",
+    "@capacitor/network": "^7.0.0",
+    "@capacitor/preferences": "^7.0.0",
+    "@capacitor/splash-screen": "^7.0.0",
+    "@capacitor/status-bar": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/assets": "^3.0.5",
+    "@capacitor/cli": "^7.0.0",
+    "@fontsource-variable/jetbrains-mono": "^5.0.0",
+    "pretendard": "^1.3.9"
+  }
+}

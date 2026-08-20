@@ -1,0 +1,164 @@
+name: apk
+
+# 태그를 밀면 서명된 APK 가 Releases 에 올라간다. 지인은 링크만 받으면 된다.
+#
+# 로컬에 Android SDK 를 깔 필요가 없다. ubuntu 러너에 SDK·JDK·Node 가 이미 있고
+# android/ 는 여기서 `cap add` 로 매번 새로 만들어 patch-android.mjs 로 손본다.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # Capacitor 7 은 JDK 21 을 쓴다. 17 로는 AGP 가 뜨지 않는다.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: 의존성 설치
+        # package-lock.json 을 커밋했다면 `npm ci` 로 바꾸는 편이 재현성이 좋다.
+        run: npm install --no-audit --no-fund
+
+      - name: 폰트 번들
+        run: node scripts/bundle-fonts.mjs
+
+      - name: 안드로이드 플랫폼 생성
+        run: npx cap add android
+
+      - name: 웹 자산 동기화
+        run: npx cap sync android
+
+      - name: 아이콘 · 스플래시 생성
+        # 실패해도 Capacitor 기본 아이콘으로 빌드는 끝까지 간다
+        continue-on-error: true
+        run: npx @capacitor/assets generate --android
+
+      - name: Pages 주소 · 버전 주입
+        env:
+          OVERRIDE: ${{ vars.PAGES_URL }}
+        run: |
+          OWNER=$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')
+          REPO="${GITHUB_REPOSITORY#*/}"
+          if [ -n "$OVERRIDE" ]; then
+            PAGES_URL="$OVERRIDE"
+          elif [ "$(echo "$REPO" | tr '[:upper:]' '[:lower:]')" = "$OWNER.github.io" ]; then
+            PAGES_URL="https://$OWNER.github.io"
+          else
+            PAGES_URL="https://$OWNER.github.io/$REPO"
+          fi
+          # 태그 실행이면 태그를, 수동 실행이면 package.json 버전을 쓴다.
+          # (수동 실행의 GITHUB_REF_NAME 은 브랜치명이라 버전이 될 수 없다)
+          case "$GITHUB_REF" in
+            refs/tags/*) APP_VERSION="${GITHUB_REF_NAME#v}" ;;
+            *)           APP_VERSION=$(node -p "require('./package.json').version") ;;
+          esac
+          echo "PAGES_URL=$PAGES_URL  APP_VERSION=$APP_VERSION"
+          echo "APP_VERSION=$APP_VERSION" >> $GITHUB_ENV
+          PAGES_URL="$PAGES_URL" \
+          REPO_SLUG="$GITHUB_REPOSITORY" \
+          APP_VERSION="$APP_VERSION" \
+            node scripts/inject-config.mjs
+
+      - name: 안드로이드 프로젝트 패치
+        env:
+          # versionCode 는 단조 증가해야 덮어 설치가 된다. 실행 번호를 그대로 쓴다.
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          # versionName 을 태그와 맞춘다 (patch-android 는 package.json 을 읽는다)
+          node -e "const f='package.json',j=require('./'+f);j.version=process.env.APP_VERSION;require('fs').writeFileSync(f,JSON.stringify(j,null,2)+'\n')"
+          node scripts/patch-android.mjs
+
+      - name: 서명 여부 판별
+        id: sign
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
+            echo "mode=release" >> $GITHUB_OUTPUT
+          else
+            # 키스토어가 아직 없어도 첫 스모크 테스트는 되게 한다.
+            # 다만 디버그 서명은 빌드마다 달라져 기존 설치본을 덮어쓰지 못한다.
+            echo "::warning::KEYSTORE_B64 시크릿이 없어 디버그 APK 로 빌드합니다. 업데이트 설치가 불가능합니다."
+            echo "mode=debug" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 빌드
+        working-directory: android
+        env:
+          KEYSTORE_PATH: release.keystore
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          if [ "${{ steps.sign.outputs.mode }}" = "release" ]; then
+            ./gradlew assembleRelease --no-daemon
+          else
+            ./gradlew assembleDebug --no-daemon
+          fi
+
+      - name: 산출물 정리
+        id: out
+        run: |
+          mkdir -p dist
+          MODE="${{ steps.sign.outputs.mode }}"
+          SRC=$(find "android/app/build/outputs/apk/$MODE" -name '*.apk' | head -1)
+          if [ -z "$SRC" ]; then echo "APK 를 찾지 못했습니다"; exit 1; fi
+          NAME="walking-condition-${APP_VERSION}-${MODE}.apk"
+          cp "$SRC" "dist/$NAME"
+          echo "name=$NAME" >> $GITHUB_OUTPUT
+          {
+            echo "### APK"
+            echo "- 파일 \`$NAME\`"
+            echo "- 서명 **${{ steps.sign.outputs.mode }}**"
+            echo "- 크기 $(du -h "dist/$NAME" | cut -f1)"
+          } >> $GITHUB_STEP_SUMMARY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.out.outputs.name }}
+          path: dist/*.apk
+          retention-days: 30
+
+      - name: 릴리스 업로드
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*.apk
+          generate_release_notes: true
+          body: |
+            ## 설치
+
+            1. 아래 APK 를 안드로이드 폰에서 내려받는다
+            2. "이 출처의 앱 설치 허용" 요청이 뜨면 허용 (브라우저별 최초 1회)
+            3. 설치 → Play Protect 경고가 떠도 그대로 설치
+
+            Play 스토어에 등록하지 않은 앱이라 경고가 뜨는 게 정상이다.
+
+            **업데이트는 자동이 아니다.** 새 APK 를 받아 덮어 설치한다.
+            앱 상단 툴바에 새 버전이 있으면 표시된다.
+
+            구명조끼 착용은 갯바위·방파제에서 법적 의무다.
+            금어기·출입통제구역은 출조 전 별도로 확인할 것.

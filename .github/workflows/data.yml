@@ -1,0 +1,128 @@
+name: data
+
+# 6시간마다 수온을 갱신하고, 법령 시행일이 바뀌면 별표를 다시 받고,
+# 다음 연도 조석 캐시가 없으면 예산 범위 안에서 조금씩 채운다.
+# 한 번 켜두면 손댈 일이 없도록 설계했다.
+on:
+  schedule:
+    - cron: '10 */6 * * *'      # UTC 00/06/12/18시 10분 → KST 09/15/21/03시
+  workflow_dispatch:            # 수동 실행 버튼
+  push:
+    branches: [main]
+    paths: ['*.py', '.github/workflows/**']
+
+concurrency:
+  group: data
+  cancel-in-progress: false     # 커밋 충돌을 막기 위해 취소하지 않고 줄 세운다
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # PAT 이 있으면 그걸로 체크아웃해야 push 도 PAT 으로 나간다.
+          # 봇 커밋만 쌓이면 60일 후 스케줄이 자동 비활성화되므로 PAT 을 권장.
+          token: ${{ secrets.PAT || github.token }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ── 1. 연안 수온 (매 실행) ─────────────────────────────
+      - name: 수온 수집
+        continue-on-error: true
+        env:
+          KHOA_KEY: ${{ secrets.KHOA_KEY }}
+          NIFS_KEY: ${{ secrets.NIFS_KEY }}
+        run: |
+          if [ -n "$NIFS_KEY" ]; then
+            python collect_sst.py --with-nifs
+          else
+            python collect_sst.py
+          fi
+
+      # ── 2. 법령 (시행일이 바뀐 경우에만 전체 재수집) ────────
+      - name: 법령 시행일 확인
+        id: law
+        continue-on-error: true
+        env:
+          LAW_OC: ${{ secrets.LAW_OC }}
+        run: |
+          if [ -z "$LAW_OC" ]; then echo "skip=1" >> $GITHUB_OUTPUT; exit 0; fi
+          if python sync_regulations.py --check; then
+            echo "changed=0" >> $GITHUB_OUTPUT
+          else
+            echo "changed=1" >> $GITHUB_OUTPUT
+          fi
+
+      - name: 법령 별표 재수집
+        if: steps.law.outputs.changed == '1'
+        env:
+          LAW_OC: ${{ secrets.LAW_OC }}
+        run: python sync_regulations.py
+
+      # ── 3. 조석 (파일이 없을 때만, 예산 범위 안에서 조금씩) ──
+      # 40개소 × 365일 = 약 14,600 호출이라 한 번에 못 받는다.
+      # 하루 4회 × 1,200회 = 4,800회씩 → 3~4일이면 한 해가 완성된다.
+      - name: 조석 캐시 채우기
+        continue-on-error: true
+        env:
+          KHOA_KEY: ${{ secrets.KHOA_KEY }}
+        run: |
+          set +e
+          YEAR=$(date -u -d '+9 hours' +%Y)
+          NEXT=$((YEAR + 1))
+          MONTH=$(date -u -d '+9 hours' +%m)
+
+          python build_tides.py --year "$YEAR" --budget 1200
+          echo "올해 조석 exit=$?"
+
+          # 11월부터는 내년치를 미리 받아둔다. 연초에 물때가 비는 일이 없도록.
+          if [ "$MONTH" -ge 11 ]; then
+            python build_tides.py --year "$NEXT" --budget 1200
+          fi
+          exit 0
+
+      # ── 4. 변경분만 커밋 ──────────────────────────────────
+      - name: 커밋
+        run: |
+          git config user.name  "data-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A data .cache
+          if git diff --quiet --cached; then
+            echo "변경 없음"
+            exit 0
+          fi
+          git commit -m "data: $(date -u -d '+9 hours' '+%Y-%m-%d %H:%M') KST"
+          # 다른 실행이 먼저 푸시했을 수 있으므로 리베이스 후 재시도
+          for i in 1 2 3; do
+            git pull --rebase --autostash origin main && git push origin HEAD:main && exit 0
+            sleep 5
+          done
+          exit 1
+
+      # ── 5. 상태 요약 (Actions 화면에서 한눈에) ─────────────
+      - name: 상태
+        if: always()
+        run: |
+          echo "### 데이터 상태" >> $GITHUB_STEP_SUMMARY
+          for f in data/sst-latest.json data/regulations.json; do
+            if [ -f "$f" ]; then
+              echo "- \`$f\` — $(python -c "import json,sys;d=json.load(open('$f'));print(d.get('generated') or d.get('fetched') or '?')")" >> $GITHUB_STEP_SUMMARY
+            else
+              echo "- \`$f\` — **없음**" >> $GITHUB_STEP_SUMMARY
+            fi
+          done
+          for f in data/tide-*.json; do
+            [ -f "$f" ] && echo "- \`$f\` — $(du -h "$f" | cut -f1)" >> $GITHUB_STEP_SUMMARY
+          done
+          for f in .cache/tide-*.partial.json; do
+            [ -f "$f" ] && echo "- \`$f\` — 수집 진행 중" >> $GITHUB_STEP_SUMMARY
+          done
+          true

@@ -1,0 +1,1296 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>연안 워킹 조건 스코어</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#071A21">
+<style>
+/* ── 번들 폰트 ────────────────────────────────────────────────
+   앱은 오프라인에서도 계기판 서체를 유지해야 한다. npm 패키지의 woff2 를
+   scripts/bundle-fonts.mjs 가 www/fonts/ 로 복사해 APK 에 함께 담는다.
+   웹(Pages)에는 fonts/ 가 없으므로 위 CDN 폰트로 자동 폴백된다.        */
+@font-face{font-family:'PretendardBundled';font-style:normal;font-weight:45 920;
+  font-display:swap;src:url('./fonts/PretendardVariable.woff2') format('woff2-variations')}
+@font-face{font-family:'JBMonoBundled';font-style:normal;font-weight:100 800;
+  font-display:swap;src:url('./fonts/JetBrainsMono.woff2') format('woff2-variations')}
+:root{
+  --abyss:#071A21; --deep:#0D2A33; --shelf:#14424C; --shoal:#1E6470;
+  --sand:#EFE3C6; --sand-dim:#93917F; --line:rgba(239,227,198,.14);
+  --magenta:#FF2E6E; --aqua:#46E0C8; --amber:#FFB23D; --slate:#5E7B85;
+  --mono:'JBMonoBundled','JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  --sans:'PretendardBundled','Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0}
+body{background:var(--abyss);color:var(--sand);font-family:var(--sans);font-size:15px;line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  background-image:linear-gradient(180deg,#04121A 0%,#071A21 22%,#0A222B 60%,#071A21 100%);
+  background-attachment:fixed}
+#shell{max-width:430px;margin:0 auto;min-height:100vh;padding:0 0 44px;position:relative}
+.desk{display:none}
+@media(min-width:760px){
+  .desk{position:fixed;left:0;top:0;bottom:0;right:calc(50% + 215px);display:flex;align-items:center;
+    justify-content:center;padding:40px;text-align:right}
+  .desk p{font-family:var(--mono);font-size:11px;letter-spacing:.14em;color:var(--slate);max-width:220px;line-height:2}
+  #shell{border-left:1px solid var(--line);border-right:1px solid var(--line)}
+}
+header{padding:24px 20px 14px;border-bottom:1px solid var(--line)}
+.eyebrow{font-family:var(--mono);font-size:10px;letter-spacing:.26em;color:var(--shoal);
+  text-transform:uppercase;display:flex;justify-content:space-between;align-items:baseline}
+.eyebrow b{color:var(--magenta);font-weight:500}
+h1{font-size:24px;font-weight:800;letter-spacing:-.03em;margin:11px 0 4px;line-height:1.15}
+h1 span{color:var(--shoal)}
+.sub{font-family:var(--mono);font-size:10px;color:var(--sand-dim);letter-spacing:.04em}
+
+/* feed status */
+.feeds{display:flex;gap:5px;margin-top:12px;flex-wrap:wrap}
+.feed{font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;padding:3px 6px;
+  border:1px solid var(--line);color:var(--slate)}
+.feed.ok{color:var(--aqua);border-color:rgba(70,224,200,.34)}
+.feed.warn{color:var(--amber);border-color:rgba(255,178,61,.34)}
+.feed.err{color:var(--magenta);border-color:rgba(255,46,110,.34)}
+
+/* 오프라인 배너 · 네이티브 툴바 */
+.offbar{margin-top:10px;padding:6px 9px;border:1px solid var(--magenta);border-radius:2px;
+  font-family:var(--mono);font-size:9px;letter-spacing:.14em;color:var(--magenta)}
+.toolbar{display:flex;gap:6px;margin-top:11px;flex-wrap:wrap;align-items:center}
+.tbtn{background:transparent;border:1px solid var(--line);border-radius:2px;color:var(--sand-dim);
+  font-family:var(--mono);font-size:9px;letter-spacing:.14em;padding:5px 9px;cursor:pointer}
+.tbtn[aria-pressed="true"]{border-color:rgba(70,224,200,.34);color:var(--aqua)}
+.tbtn:disabled{opacity:.45}
+.tver{margin-left:auto;font-family:var(--mono);font-size:8.5px;letter-spacing:.12em;
+  color:var(--shelf);text-decoration:none}
+.tver.up{color:var(--amber);border-bottom:1px solid rgba(255,178,61,.4)}
+
+/* mode switch */
+.modebar{display:flex;border:1px solid var(--line);margin:18px 20px 0}
+.modebtn{flex:1;background:transparent;border:0;color:var(--sand-dim);font-family:var(--sans);
+  font-size:13px;font-weight:700;padding:11px 6px;cursor:pointer;letter-spacing:-.01em;transition:.15s}
+.modebtn small{display:block;font-family:var(--mono);font-size:8px;letter-spacing:.16em;
+  font-weight:400;color:var(--shelf);margin-top:2px}
+.modebtn[aria-pressed="true"]{background:var(--sand);color:#071A21}
+.modebtn[aria-pressed="true"] small{color:rgba(7,26,33,.55)}
+
+section{padding:20px;border-bottom:1px solid var(--line)}
+.slabel{font-family:var(--mono);font-size:9.5px;letter-spacing:.22em;color:var(--shoal);
+  text-transform:uppercase;margin-bottom:12px;display:flex;justify-content:space-between;gap:8px}
+.slabel em{font-style:normal;color:var(--sand-dim);text-transform:none;letter-spacing:.04em;text-align:right}
+
+.chip.shut{border-color:rgba(255,46,110,.42)}
+.chip.shut small{color:var(--magenta)}
+.legal{margin-top:18px;border:1px solid var(--line)}
+.legal.shut{border-color:rgba(255,46,110,.45)}
+.legalhead{display:flex;justify-content:space-between;align-items:baseline;gap:8px;
+  padding:9px 12px;border-bottom:1px solid var(--line);
+  font-family:var(--mono);font-size:9.5px;letter-spacing:.2em;color:var(--shoal)}
+.legalhead em{font-style:normal;letter-spacing:.04em;color:var(--sand-dim);text-align:right;font-size:8.5px}
+.legalnow{background:var(--magenta);color:#0A0E12;font-family:var(--mono);font-size:11px;
+  font-weight:700;letter-spacing:.08em;padding:8px 12px}
+.legalgrid{display:grid;grid-template-columns:1fr 1fr}
+.legalgrid>div{padding:11px 12px}
+.legalgrid>div+div{border-left:1px solid var(--line)}
+.legalgrid dt{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--shoal);margin-bottom:5px}
+.legalgrid dd{margin:0;font-family:var(--mono);font-weight:700;letter-spacing:-.02em}
+.legalgrid dd.big{font-size:27px;line-height:1}
+.legalgrid dd.big2{font-size:13px;line-height:1.35;padding-top:4px}
+.legalgrid dd i{font-style:normal;font-size:11px;color:var(--sand-dim);margin-left:2px}
+.legalgrid p{margin:6px 0 0;font-size:11px;color:var(--sand-dim);line-height:1.55}
+.legalnote{margin:0;padding:9px 12px;border-top:1px solid var(--line);
+  font-size:11px;line-height:1.65;color:var(--sand-dim)}
+.legalnote.warnx{color:var(--amber)}
+.legalnote a{color:var(--aqua);text-decoration:none;border-bottom:1px solid rgba(70,224,200,.4)}
+.gearrow{display:flex;gap:0;border:1px solid var(--line);margin-bottom:11px}
+.gbtn{flex:1;background:transparent;border:0;border-right:1px solid var(--line);color:var(--sand-dim);
+  font-family:var(--sans);font-size:12px;font-weight:700;padding:7px 2px;cursor:pointer;
+  display:flex;align-items:baseline;justify-content:center;gap:4px;letter-spacing:-.01em}
+.gbtn:last-child{border-right:0}
+.gbtn b{font-family:var(--mono);font-size:8.5px;font-weight:400;color:var(--shelf)}
+.gbtn[aria-pressed="true"]{background:var(--shelf);color:var(--sand)}
+.gbtn[aria-pressed="true"] b{color:var(--aqua)}
+.rankfoot{font-family:var(--mono);font-size:9px;letter-spacing:.06em;color:var(--shelf);
+  margin-bottom:9px;line-height:1.7}
+.chips{display:flex;gap:7px;overflow-x:auto;padding:0 20px 4px;margin:0 -20px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;background:transparent;border:1px solid var(--line);color:var(--sand-dim);
+  padding:8px 13px;border-radius:2px;font-family:var(--sans);font-size:13px;font-weight:600;
+  cursor:pointer;transition:.16s;white-space:nowrap;position:relative}
+.chip small{font-family:var(--mono);font-size:8.5px;letter-spacing:.1em;display:block;color:var(--shelf);margin-top:1px}
+.chip[aria-pressed="true"]{background:var(--magenta);border-color:var(--magenta);color:#0A0E12}
+.chip[aria-pressed="true"] small{color:rgba(10,14,18,.62)}
+.chip.off{opacity:.42}
+.chip.off::after{content:'';position:absolute;left:8%;right:8%;top:50%;height:1px;background:var(--slate)}
+
+.timerow{display:flex;align-items:baseline;gap:9px;margin-bottom:8px;flex-wrap:wrap}
+.bigclock{font-family:var(--mono);font-size:29px;font-weight:700;letter-spacing:-.02em}
+.dayoff{font-family:var(--mono);font-size:10px;color:var(--shoal);letter-spacing:.14em}
+.phase{font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;color:var(--amber);
+  border:1px solid rgba(255,178,61,.32);padding:3px 6px;margin-left:auto}
+input[type=range]{-webkit-appearance:none;width:100%;height:26px;background:transparent;margin:0}
+input[type=range]::-webkit-slider-runnable-track{height:2px;background:var(--shelf)}
+input[type=range]::-moz-range-track{height:2px;background:var(--shelf)}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:3px;height:22px;background:var(--magenta);
+  margin-top:-10px;border-radius:0;cursor:pointer;box-shadow:0 0 0 5px rgba(255,46,110,.14)}
+input[type=range]::-moz-range-thumb{width:3px;height:22px;background:var(--magenta);border:0;border-radius:0}
+.ticks{display:flex;justify-content:space-between;font-family:var(--mono);font-size:9px;color:var(--shelf);margin-top:-2px}
+
+svg#chart{display:block;width:100%;height:auto}
+.coast{fill:#0B242C;stroke:var(--shelf);stroke-width:.9}
+.grat{stroke:rgba(239,227,198,.045);stroke-width:.5}
+.searim{fill:none;stroke:rgba(70,224,200,.10);stroke-width:6}
+.mk{cursor:pointer}
+.mk circle.halo{fill:none;stroke-width:1}
+.mk.sel circle.halo{stroke-dasharray:2 3;animation:spin 9s linear infinite;transform-origin:center}
+@keyframes spin{to{stroke-dashoffset:-40}}
+.seatag{font-family:var(--mono);font-size:7px;letter-spacing:.28em;fill:var(--shelf)}
+
+/* point list (region mode) */
+.plist{display:flex;flex-direction:column;gap:1px;background:var(--line);border:1px solid var(--line);max-height:270px;overflow-y:auto}
+.prow{background:var(--abyss);border:0;width:100%;text-align:left;padding:10px 12px;cursor:pointer;
+  display:flex;align-items:center;gap:10px;font-family:var(--sans);color:var(--sand)}
+.prow[aria-pressed="true"]{background:var(--deep)}
+.prow b{font-size:14px;font-weight:700;flex:1;letter-spacing:-.01em}
+.prow i{font-style:normal;font-family:var(--mono);font-size:9px;color:var(--sand-dim);letter-spacing:.06em}
+.pdot{width:7px;height:7px;flex:0 0 7px;border-radius:50%}
+.pscore{font-family:var(--mono);font-size:15px;font-weight:700}
+
+/* species ranking (region mode) */
+.rank{display:flex;flex-direction:column;gap:5px;margin-bottom:18px}
+.rrow{display:flex;align-items:center;gap:9px;background:transparent;border:0;padding:5px 0;
+  cursor:pointer;font-family:var(--sans);color:var(--sand);width:100%;text-align:left}
+.rrow[aria-pressed="true"] .rname{color:var(--sand)}
+.rname{font-size:13.5px;font-weight:700;width:76px;flex:0 0 76px;color:var(--sand-dim);letter-spacing:-.01em}
+.rbar{flex:1;height:11px;background:rgba(239,227,198,.055);position:relative}
+.rbar span{position:absolute;left:0;top:0;bottom:0;transition:width .3s cubic-bezier(.22,1,.36,1)}
+.rnum{font-family:var(--mono);font-size:12px;font-weight:700;width:26px;text-align:right}
+
+.verdict{display:flex;align-items:flex-end;gap:13px;margin-bottom:4px}
+.score{font-family:var(--mono);font-size:60px;font-weight:700;line-height:.82;letter-spacing:-.05em}
+.scoreunit{font-family:var(--mono);font-size:11px;color:var(--shelf);letter-spacing:.1em;padding-bottom:6px}
+.grade{font-size:16px;font-weight:800;letter-spacing:-.02em;padding-bottom:5px;margin-left:auto;text-align:right}
+.grade small{display:block;font-family:var(--mono);font-size:9px;font-weight:400;letter-spacing:.16em;color:var(--sand-dim)}
+.ptname{font-size:19px;font-weight:800;letter-spacing:-.02em;margin:0 0 3px}
+.ptmeta{font-family:var(--mono);font-size:9.5px;color:var(--sand-dim);letter-spacing:.05em;margin-bottom:15px;line-height:1.7}
+
+.sound{margin-top:18px;border-top:1px solid var(--line);padding-top:15px;position:relative}
+.srow{display:flex;align-items:center;gap:9px;margin-bottom:6px}
+.skey{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--sand-dim);width:52px;flex:0 0 52px;text-align:right}
+.strack{height:13px;background:rgba(239,227,198,.055);position:relative;flex:0 0 auto;border-right:1px solid rgba(239,227,198,.1)}
+.sfill{position:absolute;left:0;top:0;bottom:0;transition:width .3s cubic-bezier(.22,1,.36,1)}
+.sval{font-family:var(--mono);font-size:9.5px;color:var(--slate);letter-spacing:.04em}
+.sfoot{font-family:var(--mono);font-size:9px;color:var(--shelf);letter-spacing:.12em;margin-top:10px;padding-left:61px}
+.sound.gated{opacity:.3;filter:saturate(.15)}
+.stamp{display:flex;align-items:center;justify-content:center;pointer-events:none}
+.stamp b{border:2px solid var(--magenta);color:var(--magenta);font-family:var(--mono);font-size:12px;
+  letter-spacing:.24em;padding:7px 14px;transform:rotate(-7deg);background:rgba(7,26,33,.82)}
+
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line);border:1px solid var(--line);margin-top:17px}
+.cell{background:var(--abyss);padding:10px 12px}
+.cell dt{font-family:var(--mono);font-size:8.5px;letter-spacing:.16em;color:var(--shoal);margin:0 0 4px;
+  display:flex;justify-content:space-between}
+.cell dt b{color:var(--shelf);font-weight:400;letter-spacing:.06em}
+.cell dd{margin:0;font-family:var(--mono);font-size:16px;font-weight:500;letter-spacing:-.01em}
+.cell dd i{font-style:normal;font-size:9.5px;color:var(--sand-dim);letter-spacing:.06em;margin-left:3px}
+.cell dd.warn{color:var(--amber)} .cell dd.bad{color:var(--magenta)}
+
+.note{font-size:12.5px;line-height:1.75;color:var(--sand-dim);margin-top:15px;border-left:2px solid var(--shelf);padding-left:12px}
+.note b{color:var(--sand);font-weight:700}
+footer{padding:20px 20px 30px;font-family:var(--mono);font-size:9px;line-height:2.1;letter-spacing:.07em;color:var(--shelf)}
+footer strong{color:var(--amber);font-weight:500}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="desk"><p>MOBILE ONLY<br>모바일 폭으로<br>보세요</p></div>
+<div id="shell">
+
+<header>
+  <div class="eyebrow"><span>Shore · Walking</span><b id="today">—</b></div>
+  <h1>연안 워킹<br><span>조건 스코어</span></h1>
+  <p class="sub">루어 · 원투 / 어종별 조건 적합도 판정</p>
+  <div class="feeds" id="feeds"></div>
+  <div class="offbar" id="offbar" hidden></div>
+  <div class="toolbar" id="toolbar" hidden></div>
+</header>
+
+<div class="modebar" role="group" aria-label="탐색 모드">
+  <button class="modebtn" data-mode="species" aria-pressed="true">어종 → 포인트<small>WHERE</small></button>
+  <button class="modebtn" data-mode="region"  aria-pressed="false">지역 → 어종<small>WHAT</small></button>
+</div>
+
+<section id="picker"></section>
+
+<section>
+  <div class="slabel"><span>출조 시각</span><em id="sunmeta">—</em></div>
+  <div class="timerow">
+    <span class="bigclock" id="clock">05:00</span>
+    <span class="dayoff" id="dayoff">TODAY</span>
+    <span class="phase" id="phase">—</span>
+  </div>
+  <input type="range" id="hour" min="0" max="47" value="5" aria-label="출조 시각">
+  <div class="ticks"><span>오늘 00</span><span>12</span><span>내일 00</span><span>12</span><span>24</span></div>
+</section>
+
+<section id="mapsec">
+  <div class="slabel"><span>포인트</span><em id="mapnote">탭하여 선택</em></div>
+  <svg id="chart" viewBox="0 0 320 585" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="plist"></div>
+</section>
+
+<section id="detail"></section>
+
+<footer>
+  파고·너울·바람·해면수온 : Open-Meteo (실시간)<br>
+  조석 : 국립해양조사원 KHOA — 연 1회 선계산 캐시<br>
+  연안 수온 : 국립수산과학원 NIFS / KHOA 조위관측소 — 3시간 주기 수집<br><br>
+  <strong>안전</strong> 갯바위·방파제 구명조끼 착용은 법적 의무<br>
+  <strong>법규</strong> 금어기 · 금지체장 · 출입통제구역은 출조 전 별도 확인
+</footer>
+</div>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   1. 어종 프로파일
+   ══════════════════════════════════════════════════════════════ */
+const SPECIES = {
+  flounder:{name:'광어',en:'FLOUNDER',gear:'루어',season:[5,6,7,8,9,10,11],
+    temp:{opt:[16,22],ok:[12,26],lethal:[8,29]},
+    w:{structure:.24,tide:.18,temp:.18,light:.16,wave:.12,clarity:.06,wind:.06},
+    terrain:['sand','mixed','breakwater'],clarityPref:.45,wavePref:[.3,1.2],nocturnal:false},
+  seabass:{name:'농어',en:'SEABASS',gear:'루어',season:[4,5,6,9,10,11,12],
+    temp:{opt:[13,20],ok:[9,24],lethal:[5,27]},
+    w:{light:.24,wave:.20,tide:.18,structure:.14,temp:.12,clarity:.06,wind:.06},
+    terrain:['rock','breakwater','estuary'],clarityPref:.55,wavePref:[.8,1.9],nocturnal:true},
+  rockfish:{name:'우럭',en:'ROCKFISH',gear:'루어·원투',season:[1,2,3,4,5,10,11,12],
+    temp:{opt:[10,18],ok:[6,22],lethal:[3,25]},
+    w:{structure:.30,tide:.20,temp:.16,light:.10,wave:.10,wind:.08,clarity:.06},
+    terrain:['rock','breakwater','reef'],clarityPref:.5,wavePref:[.2,1.3],nocturnal:true},
+  squid:{name:'무늬오징어',en:'SQUID',gear:'에깅',season:[8,9,10,11,12],
+    temp:{opt:[19,24],ok:[16,27],lethal:[13,29]},
+    w:{clarity:.24,temp:.20,light:.18,structure:.14,wave:.12,tide:.06,wind:.06},
+    terrain:['rock','breakwater','weed'],clarityPref:.90,wavePref:[.1,.8],nocturnal:true},
+  porgy:{name:'감성돔',en:'BLACK PORGY',gear:'루어·원투',season:[1,2,3,10,11,12],
+    temp:{opt:[10,16],ok:[7,20],lethal:[5,24]},
+    w:{tide:.26,structure:.20,temp:.16,clarity:.14,light:.10,wave:.08,wind:.06},
+    terrain:['rock','breakwater','reef'],clarityPref:.62,wavePref:[.3,1.4],nocturnal:false},
+  spanish:{name:'삼치',en:'SPANISH MACK.',gear:'루어',season:[9,10,11],
+    temp:{opt:[17,22],ok:[14,25],lethal:[11,27]},
+    w:{light:.26,temp:.18,tide:.16,structure:.14,wave:.12,wind:.08,clarity:.06},
+    terrain:['breakwater','rock'],clarityPref:.7,wavePref:[.2,1.2],nocturnal:false},
+  flatfish:{name:'가자미',en:'FLATFISH',gear:'원투',season:[1,2,3,4,11,12],
+    temp:{opt:[6,14],ok:[3,18],lethal:[1,21]},
+    w:{structure:.26,temp:.20,wave:.16,tide:.14,wind:.10,light:.08,clarity:.06},
+    terrain:['sand','mixed'],clarityPref:.4,wavePref:[.4,1.6],nocturnal:false},
+  croaker:{name:'백조기',en:'CROAKER',gear:'원투',season:[6,7,8,9,10],
+    temp:{opt:[18,25],ok:[15,28],lethal:[12,30]},
+    w:{structure:.24,tide:.22,temp:.18,wave:.14,light:.10,wind:.06,clarity:.06},
+    terrain:['sand','mixed'],clarityPref:.35,wavePref:[.2,1.3],nocturnal:false},
+  rockbream:{name:'볼락',en:'ROCKFISH SP.',gear:'루어',season:[1,2,3,4,11,12],
+    temp:{opt:[9,15],ok:[6,19],lethal:[3,22]},
+    w:{structure:.26,light:.22,tide:.16,temp:.16,clarity:.08,wave:.06,wind:.06},
+    terrain:['rock','weed','breakwater'],clarityPref:.6,wavePref:[.1,.9],nocturnal:true},
+
+  /* ── 추가 어종 ── */
+  horsemack:{name:'전갱이',en:'HORSE MACKEREL',gear:'루어',cat:'lure',seas:['S','E','J'],season:[6,7,8,9,10,11],
+    temp:{opt:[17,25],ok:[14,27],lethal:[11,29]},
+    w:{light:.28,structure:.18,temp:.16,tide:.16,wave:.10,clarity:.06,wind:.06},
+    terrain:['breakwater','rock'],clarityPref:.6,wavePref:[.1,1.0],nocturnal:true},
+  hairtail:{name:'갈치',en:'HAIRTAIL',gear:'루어',cat:'lure',seas:['S','J'],season:[8,9,10,11],
+    temp:{opt:[20,27],ok:[17,29],lethal:[14,31]},
+    w:{light:.30,temp:.18,tide:.16,structure:.14,wave:.10,clarity:.06,wind:.06},
+    terrain:['breakwater'],clarityPref:.55,wavePref:[.1,1.0],nocturnal:true},
+  marbled:{name:'쏨뱅이',en:'MARBLED ROCKFISH',gear:'루어',cat:'lure',seas:['S','E','J'],season:[12,1,2,3,4],
+    temp:{opt:[8,15],ok:[5,19],lethal:[3,22]},
+    w:{structure:.30,light:.20,tide:.18,temp:.16,wave:.08,clarity:.04,wind:.04},
+    terrain:['rock','reef','breakwater'],clarityPref:.55,wavePref:[.1,1.1],nocturnal:true},
+  greenling:{name:'노래미',en:'GREENLING',gear:'루어',cat:'lure',seas:['W','S','E','J'],season:[3,4,5,6,10,11,12],
+    temp:{opt:[10,19],ok:[7,23],lethal:[4,25]},
+    w:{structure:.30,tide:.20,temp:.18,wave:.12,clarity:.08,light:.06,wind:.06},
+    terrain:['rock','weed','mixed','breakwater'],clarityPref:.5,wavePref:[.2,1.3],nocturnal:false},
+
+  cuttlefish:{name:'갑오징어',en:'CUTTLEFISH',gear:'에깅',cat:'eging',seas:['W','S'],season:[9,10,11,12],
+    temp:{opt:[16,23],ok:[13,26],lethal:[10,28]},
+    w:{structure:.24,temp:.20,tide:.18,clarity:.16,light:.10,wave:.06,wind:.06},
+    terrain:['sand','mixed','breakwater','weed'],clarityPref:.5,wavePref:[.1,.9],nocturnal:true},
+  webfoot:{name:'주꾸미',en:'WEBFOOT OCTOPUS',gear:'에깅',cat:'eging',seas:['W','S'],season:[9,10,11],
+    temp:{opt:[17,24],ok:[14,26],lethal:[11,28]},
+    w:{structure:.28,tide:.24,temp:.18,clarity:.12,wave:.08,wind:.05,light:.05},
+    terrain:['sand','mixed','breakwater'],clarityPref:.3,wavePref:[.1,.9],nocturnal:false},
+  octopus:{name:'문어',en:'OCTOPUS',gear:'에깅',cat:'eging',seas:['E','S','J'],season:[11,12,1,2,3,4],
+    temp:{opt:[9,16],ok:[6,20],lethal:[3,23]},
+    w:{structure:.32,tide:.20,temp:.18,wave:.12,clarity:.08,light:.05,wind:.05},
+    terrain:['rock','reef','breakwater'],clarityPref:.6,wavePref:[.1,1.0],nocturnal:true},
+
+  whiting:{name:'보리멸',en:'WHITING',gear:'원투',cat:'surf',seas:['W','S','E','J'],season:[6,7,8,9],
+    temp:{opt:[18,25],ok:[15,28],lethal:[12,30]},
+    w:{structure:.26,tide:.20,temp:.18,wave:.14,light:.10,wind:.06,clarity:.06},
+    terrain:['sand','mixed'],clarityPref:.4,wavePref:[.1,1.0],nocturnal:false},
+  redsea:{name:'참돔',en:'RED SEABREAM',gear:'원투',cat:'surf',seas:['S','E','J'],season:[4,5,6,10,11],
+    temp:{opt:[14,21],ok:[11,24],lethal:[8,26]},
+    w:{tide:.26,structure:.20,temp:.16,light:.14,wave:.12,clarity:.06,wind:.06},
+    terrain:['rock','reef','breakwater'],clarityPref:.6,wavePref:[.3,1.6],nocturnal:false},
+  beakfish:{name:'돌돔',en:'STRIPED BEAKFISH',gear:'원투',cat:'surf',seas:['S','E','J'],season:[6,7,8,9],
+    temp:{opt:[21,27],ok:[18,29],lethal:[15,31]},
+    w:{structure:.30,tide:.22,temp:.18,clarity:.12,wave:.08,light:.05,wind:.05},
+    terrain:['rock','reef'],clarityPref:.75,wavePref:[.3,1.6],nocturnal:false},
+  conger:{name:'붕장어',en:'CONGER EEL',gear:'원투',cat:'surf',seas:['W','S','E','J'],season:[5,6,7,8,9,10],
+    temp:{opt:[16,25],ok:[13,27],lethal:[10,29]},
+    w:{light:.24,structure:.22,tide:.18,temp:.16,wave:.08,clarity:.06,wind:.06},
+    terrain:['sand','mixed','breakwater','estuary'],clarityPref:.35,wavePref:[.1,1.3],nocturnal:true},
+
+  nibbler:{name:'벵에돔',en:'NIBBLER',gear:'찌',cat:'float',seas:['S','J'],season:[6,7,8,9,10,11],
+    temp:{opt:[20,26],ok:[17,28],lethal:[14,30]},
+    w:{tide:.24,structure:.22,clarity:.18,temp:.16,wave:.10,wind:.05,light:.05},
+    terrain:['rock','reef','weed'],clarityPref:.8,wavePref:[.4,1.6],nocturnal:false},
+  halfbeak:{name:'학공치',en:'HALFBEAK',gear:'찌',cat:'float',seas:['E','S','J'],season:[11,12,1,2,3],
+    temp:{opt:[8,16],ok:[5,19],lethal:[3,21]},
+    w:{clarity:.24,tide:.22,temp:.20,structure:.14,wave:.10,wind:.05,light:.05},
+    terrain:['breakwater','rock','weed'],clarityPref:.8,wavePref:[.05,.7],nocturnal:false}
+};
+
+/* 기존 9종 분류 보강 — cat: 채비 / seas: 워킹으로 성립하는 해역 */
+Object.assign(SPECIES.flounder,  {cat:'lure', seas:['W','S','E','J']});
+Object.assign(SPECIES.seabass,   {cat:'lure', seas:['W','S','E','J']});
+Object.assign(SPECIES.rockfish,  {cat:'lure', seas:['W','S','E','J']});
+Object.assign(SPECIES.rockbream, {cat:'lure', seas:['S','E','J']});
+Object.assign(SPECIES.spanish,   {cat:'lure', seas:['W','S','E','J']});
+Object.assign(SPECIES.squid,     {cat:'eging',seas:['S','E','J']});
+Object.assign(SPECIES.flatfish,  {cat:'surf', seas:['W','E']});
+Object.assign(SPECIES.croaker,   {cat:'surf', seas:['W','S']});
+Object.assign(SPECIES.porgy,     {cat:'float',seas:['W','S','E','J']});
+
+const GEARS = {all:'전체', lure:'루어', eging:'에깅', surf:'원투', float:'찌'};
+
+/* ══════════════════════════════════════════════════════════════
+   금어기 · 금지체장  (수산자원관리법 시행령 별표1 · 별표2)
+   ──────────────────────────────────────────────────────────────
+   아래는 씨드값이다. sync_regulations.py 가 국가법령정보센터
+   OPEN API 로 현행 별표를 받아 data/regulations.json 을 만들면
+   그쪽이 우선한다. 씨드는 수집 실패 시의 임시 표시용이며
+   UI 에 "미검증" 이 붙는다.
+
+   len   : 금지체장 cm  (계측 기준은 measure 로 표기)
+   wt    : 금지체중 g
+   closed: 금어기 [["MM-DD","MM-DD"], ...]
+   null  : 해당 규정 없음
+   ══════════════════════════════════════════════════════════════ */
+const REG_SEED = {
+  seed:true, effective:'2026-01-01',
+  basis:'수산자원관리법 시행령 별표1·별표2',
+  species:{
+    flounder :{legal:'넙치',      len:35},
+    seabass  :{legal:'농어',      len:30},
+    rockfish :{legal:'조피볼락',  len:23},
+    rockbream:{legal:'볼락',      len:15},
+    porgy    :{legal:'감성돔',    len:25, closed:[['05-01','05-31']]},
+    spanish  :{legal:'삼치',      closed:[['05-01','05-31']]},
+    squid    :{legal:'흰꼴뚜기',  note:'무늬오징어는 별도 규정 없음. 살오징어(15cm·4~5월)와 혼동 주의'},
+    flatfish :{legal:'문치가자미',len:20, closed:[['12-01','01-31']]},
+    croaker  :{legal:'보구치',    len:15},
+    horsemack:{legal:'전갱이',    len:15},
+    hairtail :{legal:'갈치',      len:18, measure:'항문장', closed:[['07-01','07-31']]},
+    marbled  :{legal:'쏨뱅이'},
+    greenling:{legal:'쥐노래미',  len:20, closed:[['11-01','12-31']]},
+    cuttlefish:{legal:'갑오징어', len:12, measure:'외투장', unsure:true},
+    webfoot  :{legal:'주꾸미',    closed:[['05-11','08-31']]},
+    octopus  :{legal:'문어',      wt:600, closed:[['05-01','06-14']],
+               note:'대문어 600g / 참문어 300g. 참문어 금어기는 시·도지사가 조정 가능'},
+    whiting  :{legal:'청보리멸'},
+    redsea   :{legal:'참돔',      len:24},
+    beakfish :{legal:'돌돔',      len:24},
+    conger   :{legal:'붕장어',    len:35},
+    nibbler  :{legal:'벵에돔'},
+    halfbeak :{legal:'학공치'}
+  }
+};
+
+const regOf = id => ((DATA.reg && DATA.reg.species) || REG_SEED.species)[id] || null;
+const regMeta = () => DATA.reg || REG_SEED;
+
+/* 금어기 판정 — 연말연시를 걸치는 구간(12-01~01-31)을 위해 랩어라운드 처리 */
+function inClosed(r, when){
+  if(!r || !r.closed) return null;
+  const md = `${String(when.getMonth()+1).padStart(2,'0')}-${String(when.getDate()).padStart(2,'0')}`;
+  for(const [a,b] of r.closed){
+    if(a<=b ? (md>=a && md<=b) : (md>=a || md<=b)) return [a,b];
+  }
+  return null;
+}
+const mdKo = s => `${+s.slice(0,2)}.${+s.slice(3)}`;
+function regLabel(r){
+  if(!r) return '규정 없음';
+  const parts=[];
+  if(r.len) parts.push(`${r.len}cm${r.measure?` (${r.measure})`:''} 미만 금지`);
+  if(r.wt)  parts.push(`${r.wt}g 미만 금지`);
+  return parts.length ? parts.join(' · ') : '금지체장 없음';
+}
+const TIDE_COEF = {W:1.35, S:1.00, E:0.35, J:0.85};
+const SEA_NAME  = {W:'서해', S:'남해', E:'동해', J:'제주'};
+
+/* ══════════════════════════════════════════════════════════════
+   2. 포인트 DB — 공공 지도 등재 항구 · 해변 기준 (38)
+      terrain / reef / light 는 위성·해도 판독 기반 태깅
+   ══════════════════════════════════════════════════════════════ */
+const POINTS = [
+ /* 동해 */
+ {id:'geojin',  name:'거진항',      admin:'고성', sea:'E', lat:38.4483, lon:128.4634, terrain:['breakwater','rock'],           reef:1,light:1,range:.20},
+ {id:'daepo',   name:'대포항',      admin:'속초', sea:'E', lat:38.1697, lon:128.5947, terrain:['breakwater','rock'],           reef:1,light:1,range:.20},
+ {id:'namae',   name:'남애항',      admin:'양양', sea:'E', lat:37.9312, lon:128.7748, terrain:['breakwater','rock','sand'],    reef:1,light:1,range:.21},
+ {id:'jumunjin',name:'주문진항',    admin:'강릉', sea:'E', lat:37.8933, lon:128.8267, terrain:['breakwater','rock'],           reef:1,light:1,range:.22},
+ {id:'sacheon', name:'사천진해변',  admin:'강릉', sea:'E', lat:37.8395, lon:128.8735, terrain:['sand','mixed','rock'],         reef:0,light:0,range:.22},
+ {id:'mukho',   name:'묵호항',      admin:'동해', sea:'E', lat:37.5511, lon:129.1450, terrain:['breakwater','mixed'],          reef:1,light:1,range:.23},
+ {id:'imwon',   name:'임원항',      admin:'삼척', sea:'E', lat:37.2377, lon:129.3543, terrain:['breakwater','rock'],           reef:1,light:1,range:.24},
+ {id:'jukbyeon',name:'죽변항',      admin:'울진', sea:'E', lat:37.0575, lon:129.4272, terrain:['breakwater','rock','sand'],    reef:1,light:1,range:.25},
+ {id:'hupo',    name:'후포항',      admin:'울진', sea:'E', lat:36.6779, lon:129.4535, terrain:['breakwater','rock'],           reef:1,light:1,range:.26},
+ {id:'ganggu',  name:'강구항',      admin:'영덕', sea:'E', lat:36.3617, lon:129.3936, terrain:['breakwater','estuary','sand'], reef:0,light:1,range:.27},
+ {id:'yeongil', name:'영일대해변',  admin:'포항', sea:'E', lat:36.0562, lon:129.3808, terrain:['sand','mixed','breakwater'],   reef:0,light:1,range:.28},
+ {id:'guryong', name:'구룡포항',    admin:'포항', sea:'E', lat:35.9906, lon:129.5539, terrain:['breakwater','rock'],           reef:1,light:1,range:.30},
+ {id:'jeongja', name:'정자항',      admin:'울산', sea:'E', lat:35.6497, lon:129.4272, terrain:['breakwater','rock','weed'],    reef:1,light:1,range:.35},
+ /* 서해 */
+ {id:'sorae',   name:'소래포구',    admin:'인천', sea:'W', lat:37.4013, lon:126.7385, terrain:['estuary','mixed'],             reef:0,light:1,range:8.6},
+ {id:'eurwang', name:'을왕리해변',  admin:'인천', sea:'W', lat:37.4470, lon:126.3720, terrain:['sand','mixed','rock'],         reef:0,light:1,range:8.4},
+ {id:'tando',   name:'탄도항',      admin:'안산', sea:'W', lat:37.1810, lon:126.6153, terrain:['mixed','breakwater'],          reef:0,light:1,range:7.9},
+ {id:'gungpyeong',name:'궁평항',    admin:'화성', sea:'W', lat:37.1017, lon:126.7245, terrain:['sand','breakwater'],           reef:0,light:1,range:7.6},
+ {id:'waemok',  name:'왜목마을',    admin:'당진', sea:'W', lat:37.0009, lon:126.4886, terrain:['mixed','rock','sand'],         reef:0,light:0,range:7.2},
+ {id:'sinjindo',name:'신진도항',    admin:'태안', sea:'W', lat:36.7191, lon:126.1367, terrain:['breakwater','rock','mixed'],   reef:1,light:1,range:6.4},
+ {id:'deureuni',name:'드르니항',    admin:'태안', sea:'W', lat:36.5539, lon:126.2075, terrain:['breakwater','mixed'],          reef:0,light:1,range:6.5},
+ {id:'mongsan', name:'몽산포해변',  admin:'태안', sea:'W', lat:36.6222, lon:126.3178, terrain:['sand'],                        reef:0,light:0,range:6.5},
+ {id:'daecheon',name:'대천항',      admin:'보령', sea:'W', lat:36.3269, lon:126.5079, terrain:['sand','breakwater'],           reef:0,light:1,range:6.9},
+ {id:'muchang', name:'무창포해변',  admin:'보령', sea:'W', lat:36.2464, lon:126.5297, terrain:['sand','rock','mixed'],         reef:0,light:0,range:6.8},
+ {id:'hongwon', name:'홍원항',      admin:'서천', sea:'W', lat:36.1231, lon:126.5352, terrain:['breakwater','mixed'],          reef:1,light:1,range:6.5},
+ {id:'bieung',  name:'비응항',      admin:'군산', sea:'W', lat:35.9269, lon:126.5389, terrain:['breakwater','mixed'],          reef:1,light:1,range:5.8},
+ {id:'gyeokpo', name:'격포항',      admin:'부안', sea:'W', lat:35.6220, lon:126.4614, terrain:['breakwater','rock'],           reef:1,light:1,range:5.4},
+ {id:'beopseong',name:'법성포',     admin:'영광', sea:'W', lat:35.3763, lon:126.4374, terrain:['estuary','mixed'],             reef:0,light:1,range:4.9},
+ {id:'mokpo',   name:'목포북항',    admin:'목포', sea:'W', lat:34.8035, lon:126.3667, terrain:['breakwater','estuary'],        reef:0,light:1,range:3.9},
+ /* 남해 */
+ {id:'ttangkkeut',name:'땅끝항',    admin:'해남', sea:'S', lat:34.3012, lon:126.5220, terrain:['rock','reef','breakwater'],    reef:1,light:0,range:3.4},
+ {id:'wando',   name:'완도항',      admin:'완도', sea:'S', lat:34.3109, lon:126.7549, terrain:['breakwater','rock','weed'],    reef:1,light:1,range:3.2},
+ {id:'gukdong', name:'국동항',      admin:'여수', sea:'S', lat:34.7317, lon:127.7175, terrain:['breakwater','rock'],           reef:1,light:1,range:3.1},
+ {id:'bangjuk', name:'방죽포해변',  admin:'여수', sea:'S', lat:34.6207, lon:127.7930, terrain:['sand','rock','weed'],          reef:0,light:0,range:3.1},
+ {id:'mijo',    name:'미조항',      admin:'남해', sea:'S', lat:34.7048, lon:128.0470, terrain:['breakwater','rock','weed'],    reef:1,light:1,range:2.7},
+ {id:'samcheonpo',name:'삼천포항',  admin:'사천', sea:'S', lat:34.9269, lon:128.0700, terrain:['breakwater','mixed'],          reef:1,light:1,range:2.6},
+ {id:'dara',    name:'달아항',      admin:'통영', sea:'S', lat:34.7856, lon:128.4067, terrain:['rock','weed','breakwater'],    reef:1,light:1,range:2.4},
+ {id:'jisepo',  name:'지세포항',    admin:'거제', sea:'S', lat:34.8302, lon:128.7040, terrain:['breakwater','weed','rock'],    reef:1,light:1,range:2.1},
+ {id:'gujora',  name:'구조라해변',  admin:'거제', sea:'S', lat:34.8093, lon:128.6698, terrain:['sand','rock','weed'],          reef:0,light:0,range:2.1},
+ {id:'dadaepo', name:'다대포해변',  admin:'부산', sea:'S', lat:35.0446, lon:128.9666, terrain:['sand','estuary','breakwater'], reef:0,light:1,range:1.4},
+ {id:'cheongsapo',name:'청사포',    admin:'부산', sea:'S', lat:35.1604, lon:129.1955, terrain:['rock','breakwater','weed'],    reef:1,light:1,range:1.3},
+ /* 제주 */
+ {id:'sagye',   name:'사계리해변',  admin:'서귀포',sea:'J', lat:33.2270, lon:126.3120, terrain:['rock','reef','sand'],         reef:1,light:0,range:2.6},
+ {id:'seongsan',name:'성산포항',    admin:'서귀포',sea:'J', lat:33.4744, lon:126.9316, terrain:['breakwater','rock'],          reef:1,light:1,range:2.2},
+ {id:'gimnyeong',name:'김녕항',     admin:'제주', sea:'J', lat:33.5591, lon:126.7538, terrain:['breakwater','rock','weed'],    reef:1,light:1,range:2.0}
+];
+
+/* ══════════════════════════════════════════════════════════════
+   3. 데이터 수집
+      · Open-Meteo  : 브라우저 직접 호출 (키 없음 / CORS 허용 / 다중좌표 배치)
+      · KHOA 조석   : build_tides.py 가 만든 정적 JSON
+      · NIFS 수온   : collect_sst.py 가 만든 정적 JSON (없으면 Open-Meteo SST 사용)
+   ══════════════════════════════════════════════════════════════ */
+const OM_MARINE = 'https://marine-api.open-meteo.com/v1/marine';
+const OM_FCST   = 'https://api.open-meteo.com/v1/forecast';
+const YEAR = new Date().getFullYear();
+
+const DATA = { marine:null, fcst:null, tide:null, sst:null, reg:null, omOff:0 };
+const FEED = { om:'pending', tide:'pending', sst:'pending', reg:'pending' };
+const STAMP = { om:0, sst:0, reg:0 };
+
+/* ══ 네이티브 브리지 · 오프라인 캐시 ═══════════════════════════
+   앱은 GitHub Pages 의 정적 JSON 을 읽고, 웹은 같은 파일을 상대경로로 읽는다.
+   KHOA·NIFS·법령 인증키는 APK 에 넣지 않는다 — 디컴파일하면 그대로 나온다.
+   인증키가 없는 Open-Meteo 만 앱에서 직접 부른다.                          */
+const CFG = {
+  REMOTE: '__PAGES_URL__',   // CI 가 실제 GitHub Pages 주소로 치환한다
+  REPO:   '__REPO_SLUG__'    // owner/repo — 새 버전 확인용
+};
+const NATIVE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const CAP    = (window.Capacitor && window.Capacitor.Plugins) || {};
+const hasRemote = /^https?:\/\//.test(CFG.REMOTE);
+const WEB_DATA  = new URL('../data/', document.baseURI).href;
+const dataURL   = f => (NATIVE && hasRemote) ? `${CFG.REMOTE}/data/${f}` : WEB_DATA + f;
+
+const OM_TTL   = 6*36e5;                     // Open-Meteo 재요청 간격
+const REG_TTL  = 24*36e5;                    // 법령 재요청 간격
+const K        = { sst:'cache:sst:v1', reg:'cache:reg:v1', keep:'pref:keepAwake' };
+const F_OM     = 'om-cache.json';
+const tideFile = () => `tide-${YEAR}.json`;
+
+/* localStorage 는 쓰지 않는다(CLAUDE.md). 작은 값은 Preferences,
+   조석 2MB·예보 같은 대용량은 Filesystem 에 둔다.
+   웹에서는 전부 no-op — 캐시 없이 직접 받는다.                     */
+const Store = {
+  async get(k){
+    if(!NATIVE || !CAP.Preferences) return null;
+    try{ const r = await CAP.Preferences.get({key:k}); return r.value ? JSON.parse(r.value) : null; }
+    catch(e){ return null; }
+  },
+  async set(k, v){
+    if(!NATIVE || !CAP.Preferences) return;
+    try{ await CAP.Preferences.set({key:k, value:JSON.stringify(v)}); }catch(e){}
+  },
+  async getBig(name){
+    if(!NATIVE || !CAP.Filesystem) return null;
+    try{
+      const r = await CAP.Filesystem.readFile({path:name, directory:'DATA', encoding:'utf8'});
+      return JSON.parse(r.data);
+    }catch(e){ return null; }
+  },
+  async setBig(name, text){
+    if(!NATIVE || !CAP.Filesystem) return;
+    try{ await CAP.Filesystem.writeFile({path:name, directory:'DATA', encoding:'utf8', data:text, recursive:true}); }
+    catch(e){}
+  },
+  async listBig(){
+    if(!NATIVE || !CAP.Filesystem) return [];
+    try{ const r = await CAP.Filesystem.readdir({path:'', directory:'DATA'});
+         return (r.files||[]).map(f => (typeof f === 'string' ? f : f.name)); }
+    catch(e){ return []; }
+  },
+  async delBig(name){
+    if(!NATIVE || !CAP.Filesystem) return;
+    try{ await CAP.Filesystem.deleteFile({path:name, directory:'DATA'}); }catch(e){}
+  }
+};
+
+const NET = { online:true };
+async function readNetwork(){
+  if(NATIVE && CAP.Network){
+    try{ const st = await CAP.Network.getStatus(); NET.online = !!st.connected; return; }catch(e){}
+  }
+  NET.online = navigator.onLine !== false;
+}
+
+const latsQ = POINTS.map(p=>p.lat.toFixed(4)).join(',');
+const lonsQ = POINTS.map(p=>p.lon.toFixed(4)).join(',');
+
+async function loadOpenMeteo(){
+  const marineU = `${OM_MARINE}?latitude=${latsQ}&longitude=${lonsQ}`
+    + `&hourly=wave_height,wave_period,swell_wave_height,swell_wave_period,sea_surface_temperature`
+    + `&timezone=Asia%2FSeoul&forecast_days=3`;
+  const fcstU = `${OM_FCST}?latitude=${latsQ}&longitude=${lonsQ}`
+    + `&hourly=wind_speed_10m,wind_direction_10m,surface_pressure,cloud_cover,precipitation`
+    + `&daily=sunrise,sunset&timezone=Asia%2FSeoul&forecast_days=3`;
+  const [m,f] = await Promise.all([fetch(marineU), fetch(fcstU)]);
+  if(!m.ok || !f.ok) throw new Error('open-meteo ' + m.status + '/' + f.status);
+  const mj = await m.json(), fj = await f.json();
+  DATA.marine = Array.isArray(mj) ? mj : [mj];
+  DATA.fcst   = Array.isArray(fj) ? fj : [fj];
+  FEED.om = 'ok'; STAMP.om = Date.now();
+  await Store.setBig(F_OM, JSON.stringify({at:STAMP.om, marine:DATA.marine, fcst:DATA.fcst}));
+}
+
+/* hourly 배열은 오늘 00시부터 시작한다는 전제로 인덱싱된다.
+   날짜가 바뀐 캐시를 그대로 쓰면 24칸씩 밀린 값을 조용히 보게 된다.
+   time[0] 과 오늘 자정의 차이로 보정한다.                          */
+function omOffset(){
+  const t = DATA.marine && DATA.marine[0] && DATA.marine[0].hourly && DATA.marine[0].hourly.time;
+  if(!t || !t.length) return 0;
+  const midnight = new Date(); midnight.setHours(0,0,0,0);
+  const off = Math.round((midnight - new Date(t[0]))/36e5);
+  return Number.isFinite(off) ? off : 0;
+}
+
+const STALE_LIMIT = { sst: 12*36e5, reg: 150*864e5 };   // 수온 12시간 / 법령 150일
+
+/* 수집기가 죽어도 오래된 값을 조용히 쓰지 않도록 신선도를 검사한다.
+   캐시에서 꺼낸 값에도 똑같이 적용된다 — 오프라인이 면제부가 되면 안 된다. */
+function markStale(key){
+  const lim = STALE_LIMIT[key];
+  const d = DATA[key];
+  if(!lim || !d) return;
+  const ts = d.generated || d.fetched;
+  if(ts && (Date.now() - new Date(ts).getTime()) > lim){
+    FEED[key] = 'stale';
+    d.staleDays = Math.floor((Date.now()-new Date(ts).getTime())/864e5);
+  }
+}
+
+/* 조석: 연도별 영구 캐시. 2MB 를 매번 받으면 요금과 속도를 둘 다 버린다. */
+async function loadTide(){
+  const f = tideFile();
+  const r = await fetch(dataURL(f), {cache:'no-cache'});
+  if(!r.ok) throw new Error('tide ' + r.status);
+  const text = await r.text();
+  DATA.tide = JSON.parse(text);
+  FEED.tide = 'ok';
+  await Store.setBig(f, text);
+  for(const name of await Store.listBig()){          // 지난해 캐시 정리
+    if(/^tide-\d{4}\.json$/.test(name) && name !== f) await Store.delBig(name);
+  }
+}
+
+async function refreshStatic(file, key, cacheKey){
+  try{
+    const r = await fetch(dataURL(file), {cache:'no-cache'});
+    if(!r.ok) throw new Error(file + ' ' + r.status);
+    const json = await r.json();
+    DATA[key] = json; FEED[key] = 'ok'; STAMP[key] = Date.now();
+    markStale(key);
+    await Store.set(cacheKey, {at:STAMP[key], json});
+  }catch(e){
+    if(!DATA[key]) FEED[key] = 'fallback';           // 캐시도 없으면 씨드/근사로
+  }
+}
+
+/* 관측소별 정규화 상수 — 조석을 새로 읽을 때마다 1회 계산 */
+function prepTide(){
+  if(!DATA.tide || DATA.tide.maxRate) return;
+  DATA.tide.maxRate = {}; DATA.tide.maxRange = {};
+  for(const [sid, ev] of Object.entries(DATA.tide.events || {})){
+    let mr = 0, mR = 0;
+    for(let i=1; i<ev.length; i++){
+      const dh = Math.abs(ev[i][1]-ev[i-1][1]);
+      const dt = (new Date(ev[i][0]) - new Date(ev[i-1][0]))/36e5;
+      if(dt > 0){ mr = Math.max(mr, dh/2*Math.PI/dt); mR = Math.max(mR, dh); }
+    }
+    DATA.tide.maxRate[sid] = mr; DATA.tide.maxRange[sid] = mR;
+  }
+}
+
+/* 1단계 — 캐시에서 즉시 복원. 네트워크를 기다리지 않는다. */
+async function hydrate(){
+  const [om, tide, sst, reg] = await Promise.all([
+    Store.getBig(F_OM), Store.getBig(tideFile()), Store.get(K.sst), Store.get(K.reg)
+  ]);
+  if(om && om.marine){ DATA.marine = om.marine; DATA.fcst = om.fcst; STAMP.om = om.at||0; FEED.om = 'cache'; }
+  if(tide){ DATA.tide = tide; FEED.tide = 'cache'; }
+  if(sst && sst.json){ DATA.sst = sst.json; STAMP.sst = sst.at||0; FEED.sst = 'cache'; markStale('sst'); }
+  if(reg && reg.json){ DATA.reg = reg.json; STAMP.reg = reg.at||0; FEED.reg = 'cache'; markStale('reg'); }
+  prepTide(); DATA.omOff = omOffset();
+}
+
+/* 2단계 — 백그라운드 갱신. 실패해도 캐시를 조용히 유지한다. */
+async function refresh(){
+  const jobs = [];
+  if(!DATA.marine || Date.now()-STAMP.om > OM_TTL)
+    jobs.push(loadOpenMeteo().catch(()=>{ if(!DATA.marine) FEED.om = 'err'; }));
+  if(!DATA.tide)
+    jobs.push(loadTide().catch(()=>{ FEED.tide = 'fallback'; }));
+  jobs.push(refreshStatic('sst-latest.json', 'sst', K.sst));
+  if(!DATA.reg || Date.now()-STAMP.reg > REG_TTL)
+    jobs.push(refreshStatic('regulations.json', 'reg', K.reg));
+  await Promise.all(jobs);
+  prepTide(); DATA.omOff = omOffset();
+}
+
+/* ── 조석: 최근접 관측소의 고/저조 이벤트를 사인 보간 ──
+   level(t)  = (h1+h2)/2 + (h1-h2)/2 · cos(π·τ)
+   |dh/dt| ∝ sin(π·τ)  → 정조 0, 중들물/중날물 최대  (조류 세기 프록시)  */
+function tideAt(pt, when){
+  if(!DATA.tide) return null;
+  let best=null, bd=1e9;
+  for(const [sid,st] of Object.entries(DATA.tide.stations)){
+    const d = Math.hypot((st.lat-pt.lat)*111, (st.lon-pt.lon)*89);
+    if(d<bd){ bd=d; best=sid; }
+  }
+  const ev = DATA.tide.events[best]; if(!ev || ev.length<2) return null;
+  const t = when.getTime();
+  let i = ev.findIndex(e => new Date(e[0]).getTime() > t);
+  if(i<1) return null;
+  const [t1,h1] = [new Date(ev[i-1][0]).getTime(), ev[i-1][1]];
+  const [t2,h2] = [new Date(ev[i][0]).getTime(),   ev[i][1]];
+  const tau = (t-t1)/(t2-t1);
+  const level = (h1+h2)/2 + (h1-h2)/2*Math.cos(Math.PI*tau);
+  const rate  = Math.abs((h1-h2)/2 * Math.PI/((t2-t1)/36e5) * Math.sin(Math.PI*tau)); // cm/h
+  const rng   = Math.abs(h1-h2);
+  return { level, rate, range:rng, rising:h2>h1,
+           refRange: DATA.tide.maxRange[best] || rng,
+           refRate:  DATA.tide.maxRate[best]  || rate || 1,
+           station:  DATA.tide.stations[best].name, dist:bd };
+}
+
+/* 조석 캐시 없을 때: 달 위상 기반 근사 */
+function tideApprox(pt, hourAbs){
+  const lunar = (Math.floor(Date.now()/864e5) % 14.77)/14.77;
+  const ampl  = .35 + .65*Math.abs(Math.sin(lunar*Math.PI));
+  const phase = ((hourAbs/12.42) + pt.lon*0.7) % 1;
+  return { rate:Math.abs(Math.sin(phase*2*Math.PI)), refRate:1,
+           range:ampl*pt.range, refRange:pt.range,
+           rising:Math.cos(phase*2*Math.PI)<0, approx:true };
+}
+
+/* ── 연안 수온: NIFS/KHOA 관측 우선, 없으면 Open-Meteo 격자 SST ── */
+function sstAt(pt, omSst){
+  if(DATA.sst && DATA.sst.stations){
+    let best=null, bd=1e9;
+    for(const s of DATA.sst.stations){
+      const d = Math.hypot((s.lat-pt.lat)*111, (s.lon-pt.lon)*89);
+      if(d<bd){ bd=d; best=s; }
+    }
+    if(best && bd<=35 && best.temp!=null)
+      return { v:best.temp, src:best.agency||'NIFS', dist:bd, station:best.name };
+  }
+  return { v:omSst, src:'OM', dist:null };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   4. 조건 벡터
+   ══════════════════════════════════════════════════════════════ */
+function conditions(pt, hourAbs){
+  const i = POINTS.indexOf(pt);
+  const M = DATA.marine && DATA.marine[i] && DATA.marine[i].hourly;
+  const F = DATA.fcst   && DATA.fcst[i]   && DATA.fcst[i].hourly;
+  const D = DATA.fcst   && DATA.fcst[i]   && DATA.fcst[i].daily;
+  const h  = Math.round(hourAbs) + (DATA.omOff||0);   // 캐시가 어제 것이면 인덱스가 밀린다
+  const h24 = Math.max(0, h-24);
+
+  const pick = (arr,k)=> arr && arr[k]!=null ? arr[k] : null;
+  const wave  = pick(M&&M.wave_height, h) ?? 0.6;
+  const swellH= pick(M&&M.swell_wave_height, h) ?? wave*0.6;
+  const swellP= pick(M&&M.swell_wave_period, h) ?? pick(M&&M.wave_period,h) ?? 6;
+  const omSst = pick(M&&M.sea_surface_temperature, h);
+  const wind  = pick(F&&F.wind_speed_10m, h) ?? 4;
+  const windD = pick(F&&F.wind_direction_10m, h) ?? 0;
+  const pres  = pick(F&&F.surface_pressure, h);
+  const pres24= pick(F&&F.surface_pressure, h24);
+  const cloud = pick(F&&F.cloud_cover, h) ?? 40;
+  const rain  = pick(F&&F.precipitation, h) ?? 0;
+
+  const dayIdx = Math.floor(hourAbs/24);
+  const sunH = s => s ? (new Date(s).getHours() + new Date(s).getMinutes()/60) : null;
+  const sunrise = (D && sunH(D.sunrise[dayIdx])) ?? 5.6;
+  const sunset  = (D && sunH(D.sunset[dayIdx]))  ?? 19.0;
+
+  // 수온: 관측 우선 + 24h 변화
+  const now = new Date(); now.setHours(0,0,0,0);
+  const when = new Date(now.getTime() + hourAbs*36e5);
+  const sstPick = sstAt(pt, omSst);
+  const sst = sstPick.v ?? 15;
+  const sstPrev = pick(M&&M.sea_surface_temperature, h24) ?? sst;
+  const dT = (omSst!=null && h>=24) ? (omSst - sstPrev) : (omSst!=null ? 0 : 0);
+
+  // 조석
+  const td = tideAt(pt, when) || tideApprox(pt, hourAbs);
+  const flow = Math.min(1, td.rate / Math.max(td.refRate, 1e-6));
+  const amplRatio = Math.min(1, td.range / Math.max(td.refRange, 1e-6));
+
+  // 물색: 해역 기저 × 파고 교란 × 강우
+  const clarBase = {W:.22,S:.62,E:.88,J:.85}[pt.sea];
+  const clarity = Math.max(.05, Math.min(1, clarBase - wave*0.12 - rain*0.05));
+
+  return { wave, swellH, swellP, sst, dT, wind, windD, cloud, rain, clarity,
+           pres, dP: (pres!=null&&pres24!=null)? pres-pres24 : 0,
+           flow, amplRatio, rising:td.rising, tideRange:td.range,
+           tideStation:td.station, tideApprox:!!td.approx,
+           sstSrc:sstPick.src, sstStation:sstPick.station,
+           sunrise, sunset, when };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   5. 스코어링 엔진 (순수 함수)
+      Score = Gate_season × Gate_temp × Gate_safety × Σ(wᵢ·fᵢ)
+   ══════════════════════════════════════════════════════════════ */
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+function band(v,[lo,hi],[flo,fhi]){
+  if(v>=lo&&v<=hi) return 1;
+  if(v<lo) return v<=flo?0:.25+.75*(v-flo)/(lo-flo);
+  return v>=fhi?0:.25+.75*(fhi-v)/(fhi-hi);
+}
+function score(pt, sp, c, hourAbs){
+  const P = SPECIES[sp];
+  const month = c.when.getMonth()+1;
+  const hod = hourAbs % 24;
+
+  const closed  = inClosed(regOf(sp), c.when);
+  const gLegal  = closed ? 0 : 1;
+  const gRegion = (P.seas || ['W','S','E','J']).includes(pt.sea) ? 1 : 0;
+  const gSeason = P.season.includes(month) ? 1 : 0;
+  const gTemp   = (c.sst > P.temp.lethal[0] && c.sst < P.temp.lethal[1]) ? 1 : 0;
+  const gSafe   = (c.wave >= 3.0 || (c.swellP >= 9 && c.swellH >= 1.5)) ? 0 : 1;
+
+  const f = {};
+  f.temp = band(c.sst, P.temp.opt, P.temp.lethal) * (Math.abs(c.dT) >= 2 ? .5 : 1);
+  f.tide = clamp(c.flow * (.45 + .55*c.amplRatio) * (c.rising ? 1.08 : .96));
+  const dSun = Math.min(Math.abs(hod-c.sunrise), Math.abs(hod-c.sunset));
+  let light = clamp(1 - dSun/2.6, .18, 1);
+  const isNight = hod < c.sunrise-.6 || hod > c.sunset+.6;
+  if(P.nocturnal && isNight) light = Math.max(light, pt.light ? .72 : .55);
+  f.light = light;
+  f.wave = band(c.wave, P.wavePref, [0, P.wavePref[1]+1.6]);
+  f.wind = clamp(1 - Math.max(0, c.wind-6)/7);
+  f.clarity = clamp(1 - Math.abs(c.clarity - P.clarityPref)/.62);
+  const hit = pt.terrain.filter(t=>P.terrain.includes(t)).length;
+  f.structure = clamp(hit/Math.max(1,Math.min(pt.terrain.length,P.terrain.length))
+                    + (pt.reef && P.terrain.includes('reef') ? .12 : 0));
+
+  const w = {...P.w};
+  w.tide *= TIDE_COEF[pt.sea];
+  const sum = Object.values(w).reduce((a,b)=>a+b,0);
+  Object.keys(w).forEach(k=>w[k]/=sum);
+
+  const raw = Object.keys(w).reduce((a,k)=>a+w[k]*f[k], 0);
+  const gate = gLegal*gRegion*gSeason*gTemp*gSafe;
+  return { value:Math.round(gate*raw*100), raw, f, w, gated:gate===0, closed,
+    offRegion: !gRegion, offSeason: !gSeason, offLegal: !gLegal,
+    reason: !gLegal?'금어기' : !gRegion?'해역 밖' : !gSeason?'시즌 아님'
+          : !gTemp?'수온 이탈' : !gSafe?'출조 위험' : null };
+}
+
+/* ══════════════════════════════════════════════════════════════
+   6. 상태 · 렌더링
+   ══════════════════════════════════════════════════════════════ */
+const S = { mode:'species', sp:'flounder', sea:'E', pt:'guryong', gear:'all', hour:new Date().getHours() };
+const SEA_NAME2 = seas => !seas || seas.length===4 ? '전 해역' : seas.map(s=>SEA_NAME[s]).join('·');
+const KEY_KO={temp:'수온',tide:'물때',light:'조도',wave:'파고',wind:'바람',clarity:'물색',structure:'지형'};
+const TER_KO={sand:'사질',rock:'암반',mixed:'혼합',breakwater:'방파제',reef:'어초',weed:'해조',estuary:'하구'};
+const tone=v=>v>=72?'var(--magenta)':v>=52?'var(--amber)':v>=32?'var(--aqua)':'var(--slate)';
+const grade=v=>v>=72?['적극 출조','PRIME']:v>=52?['해볼 만함','FAIR']:v>=32?['기대 낮음','WEAK']:['비추천','POOR'];
+const P_OF=id=>POINTS.find(p=>p.id===id);
+
+function drawFeeds(){
+  const L=[['om','WAVE·WIND·SST'],['tide','KHOA TIDE'],['sst','NIFS SST'],['reg','법규 별표']];
+  document.getElementById('feeds').innerHTML = L.map(([k,label])=>{
+    const st=FEED[k];
+    const cls = st==='ok'?'ok' : st==='pending'?'' : st==='stale'?'err'
+              : st==='cache'?'warn' : st==='fallback'?'warn':'err';
+    const tag = st==='ok'?'LIVE' : st==='pending'?'···'
+              : st==='stale'?`갱신중단 ${(DATA[k]&&DATA[k].staleDays)||'?'}일`
+              : st==='cache'?'캐시'
+              : st==='fallback'?(k==='reg'?'씨드':'근사'):'실패';
+    return `<span class="feed ${cls}">${label} ${tag}</span>`;
+  }).join('');
+}
+
+function drawPicker(){
+  const el = document.getElementById('picker');
+  const month = new Date().getMonth()+1;
+  if(S.mode==='species'){
+    const gearRow = Object.entries(GEARS).map(([k,label])=>{
+      const n = k==='all' ? Object.keys(SPECIES).length
+                          : Object.values(SPECIES).filter(v=>v.cat===k).length;
+      return `<button class="gbtn" data-gear="${k}" aria-pressed="${k===S.gear}">${label}<b>${n}</b></button>`;
+    }).join('');
+
+    const pool = Object.entries(SPECIES).filter(([,v])=> S.gear==='all' || v.cat===S.gear);
+    // 시즌 어종을 앞으로 — 22종이라 정렬이 없으면 스크롤이 무의미해진다
+    pool.sort((a,b)=> (b[1].season.includes(month)?1:0) - (a[1].season.includes(month)?1:0));
+    const chips = pool.map(([k,v])=>{
+      const off = !v.season.includes(month);
+      const shut = !!inClosed(regOf(k), new Date());
+      return `<button class="chip${off?' off':''}${shut?' shut':''}" data-sp="${k}" aria-pressed="${k===S.sp}">${v.name}<small>${shut?'금어기':v.gear}</small></button>`;
+    }).join('');
+
+    const P = SPECIES[S.sp];
+    const inSeason = P.season.includes(month);
+    const nSeason = pool.filter(([,v])=>v.season.includes(month)).length;
+    el.innerHTML = `<div class="slabel"><span>대상어종</span><em>${
+      inSeason ? `적수온 ${P.temp.opt[0]}–${P.temp.opt[1]}℃ · ${SEA_NAME2(P.seas)}` : `${month}월 비시즌`
+      } · 시즌 ${nSeason}종</em></div>
+      <div class="gearrow">${gearRow}</div>
+      <div class="chips" id="spChips">${chips}</div>`;
+  }else{
+    const seas = ['E','W','S','J'];
+    const chips = seas.map(k=>{
+      const n = POINTS.filter(p=>p.sea===k).length;
+      return `<button class="chip" data-sea="${k}" aria-pressed="${k===S.sea}">${SEA_NAME[k]}<small>${n} PT</small></button>`;
+    }).join('');
+    el.innerHTML = `<div class="slabel"><span>지역</span><em>물때 가중 ×${TIDE_COEF[S.sea].toFixed(2)}</em></div>
+      <div class="chips" id="seaChips">${chips}</div>`;
+  }
+}
+
+const COAST="M72.9,70 L56.7,100 L64.8,125 L44.6,175 L60.8,205 L28.4,195 L60.8,230 L64.8,270 L76.9,285 L56.7,310 L48.6,335 L60.8,365 L40.5,385 L28.4,400 L60.8,440 L93.1,425 L129.6,400 L158,390 L186.3,380 L214.7,375 L255.2,360 L275.4,350 L293.2,320 L295.7,270 L305.9,262 L287.4,215 L279.3,160 L263.3,115 L247,70 L214.7,28 L137.7,40 Z";
+const px=lon=>(lon-125.8)*81, py=lat=>(38.7-lat)*100;
+
+/* 지역모드에서는 그 포인트의 '최고 어종 점수'로 색을 칠한다 */
+function pointScore(p){
+  const c = conditions(p, S.hour);
+  if(S.mode==='species') return {v:score(p,S.sp,c,S.hour).value, sp:S.sp};
+  let bv=-1, bs=null;
+  for(const k of Object.keys(SPECIES)){
+    const v = score(p,k,c,S.hour).value;
+    if(v>bv){ bv=v; bs=k; }
+  }
+  return {v:bv, sp:bs};
+}
+
+function drawMap(){
+  const visible = S.mode==='region' ? POINTS.filter(p=>p.sea===S.sea) : POINTS;
+  const marks = visible.map(p=>{
+    const {v} = pointScore(p);
+    const x=px(p.lon), y=py(p.lat), sel=p.id===S.pt;
+    const col = v<=0 ? 'var(--slate)' : tone(v);
+    const r = 2.6 + (v/100)*4.4;
+    return `<g class="mk${sel?' sel':''}" data-pt="${p.id}" role="button" tabindex="0" aria-label="${p.name} ${v}점">
+      <circle cx="${x}" cy="${y}" r="14" fill="transparent"/>
+      <circle class="halo" cx="${x}" cy="${y}" r="${sel?11:r+3}" stroke="${col}" opacity="${sel?.95:.3}"/>
+      <circle cx="${x}" cy="${y}" r="${r}" fill="${col}" opacity="${v<=0?.5:.95}"/>
+      ${sel?`<text x="${x}" y="${y-15}" text-anchor="middle" class="seatag" fill="var(--sand)" style="font-size:8.5px;letter-spacing:.05em">${p.name}</text>`:''}
+    </g>`;
+  }).join('');
+  let grid='';
+  for(let g=50;g<585;g+=65) grid+=`<line class="grat" x1="0" y1="${g}" x2="320" y2="${g}"/>`;
+  for(let g=40;g<320;g+=65) grid+=`<line class="grat" x1="${g}" y1="0" x2="${g}" y2="585"/>`;
+  document.getElementById('chart').innerHTML = `${grid}
+    <path class="searim" d="${COAST}"/><path class="coast" d="${COAST}"/>
+    <ellipse class="coast" cx="60.8" cy="530" rx="31" ry="14"/>
+    <text class="seatag" x="14" y="250">서 해</text>
+    <text class="seatag" x="290" y="200" text-anchor="end">동 해</text>
+    <text class="seatag" x="175" y="452" text-anchor="middle">남 해</text>${marks}`;
+
+  document.getElementById('mapnote').textContent =
+    S.mode==='species' ? `${SPECIES[S.sp].name} 기준 · ${POINTS.length}개소` : `${SEA_NAME[S.sea]} ${visible.length}개소 · 최고점 어종 기준`;
+
+  // 지역모드에서만 리스트
+  const lw = document.getElementById('plist');
+  if(S.mode==='region'){
+    const rows = visible.map(p=>({p, ...pointScore(p)}))
+      .sort((a,b)=>b.v-a.v)
+      .map(({p,v,sp})=>`<button class="prow" data-pt="${p.id}" aria-pressed="${p.id===S.pt}">
+        <span class="pdot" style="background:${v<=0?'var(--slate)':tone(v)}"></span>
+        <b>${p.name}</b><i>${p.admin} · ${SPECIES[sp].name}</i>
+        <span class="pscore" style="color:${v<=0?'var(--slate)':tone(v)}">${v}</span></button>`).join('');
+    lw.innerHTML = `<div class="plist" style="margin-top:14px">${rows}</div>`;
+  } else lw.innerHTML='';
+}
+
+function drawDetail(){
+  let p = P_OF(S.pt);
+  if(S.mode==='region' && p.sea!==S.sea){ p = POINTS.filter(x=>x.sea===S.sea)[0]; S.pt=p.id; }
+  const c = conditions(p, S.hour);
+
+  // 지역모드: 어종 랭킹 → 선택된 어종의 분해도
+  let rankHTML='';
+  if(S.mode==='region'){
+    const all = Object.keys(SPECIES).map(k=>({k, s:score(p,k,c,S.hour)}));
+    const live = all.filter(x=>!x.s.gated).sort((a,b)=>b.s.value-a.s.value);
+    const nRegion = all.filter(x=>x.s.offRegion).length;
+    const nSeason = all.filter(x=>!x.s.offRegion && x.s.offSeason).length;
+    // 게이트를 통과한 종만 보여준다. 22종을 전부 나열하면 랭킹이 읽히지 않는다.
+    const list = live.length ? live : all.filter(x=>!x.s.offRegion).slice(0,4);
+    if(!list.find(x=>x.k===S.sp)) S.sp = list[0].k;
+    const foot = `<div class="rankfoot">${p.name} 가능 ${all.length-nRegion}종 중 시즌 ${live.length}종`
+      + (nSeason?` · 비시즌 ${nSeason}종 제외`:'')
+      + (nRegion?` · ${SEA_NAME[p.sea]} 미분포 ${nRegion}종 제외`:'') + `</div>`;
+    rankHTML = foot + `<div class="rank">${list.map(({k,s})=>`
+      <button class="rrow" data-sp="${k}" aria-pressed="${k===S.sp}">
+        <span class="rname" style="${k===S.sp?'color:var(--sand)':''}">${SPECIES[k].name}</span>
+        <span class="rbar"><span style="width:${Math.max(2,s.value)}%;background:${s.value<=0?'var(--slate)':tone(s.value)};opacity:${k===S.sp?1:.55}"></span></span>
+        <span class="rnum" style="color:${s.value<=0?'var(--slate)':tone(s.value)}">${s.value}</span>
+      </button>`).join('')}</div>`;
+  }
+
+  const s = score(p, S.sp, c, S.hour);
+  const [gk,ge] = grade(s.value);
+  const col = s.gated ? 'var(--slate)' : tone(s.value);
+  const maxW = Math.max(...Object.values(s.w));
+  const rows = Object.keys(s.w).sort((a,b)=>s.w[b]-s.w[a]).map(k=>{
+    const tw = 14 + (s.w[k]/maxW)*150;
+    return `<div class="srow"><span class="skey">${KEY_KO[k]}</span>
+      <span class="strack" style="width:${tw.toFixed(1)}px">
+        <span class="sfill" style="width:${(s.f[k]*100).toFixed(0)}%;background:${col};opacity:${.35+s.f[k]*.6}"></span>
+      </span><span class="sval">${(s.f[k]*100).toFixed(0)}<span style="color:var(--shelf)"> · w${(s.w[k]*100).toFixed(0)}</span></span></div>`;
+  }).join('');
+
+  const rngM = c.tideRange > 30 ? c.tideRange/100 : c.tideRange;
+  const tideName = c.amplRatio>.82?'사리':c.amplRatio>.58?'중물':c.amplRatio>.34?'무시':'조금';
+  const flowName = c.flow<.22?'정조':(c.rising?'들물':'날물')+(c.flow>.75?' 최성기':'');
+  const clarName = c.clarity>.75?'맑음':c.clarity>.45?'약탁':'탁수';
+
+  document.getElementById('detail').innerHTML = `
+    <div class="slabel"><span>판정</span><em>${S.mode==='region'?`${p.name} · 어종 랭킹`:`${SPECIES[S.sp].name} · ${SEA_NAME[p.sea]}`}</em></div>
+    <h2 class="ptname">${p.name} <span style="color:var(--shoal);font-size:13px;font-weight:600">${p.admin}</span></h2>
+    <p class="ptmeta">${p.terrain.map(t=>TER_KO[t]).join(' / ')}${p.reef?' · 어초':''}${p.light?' · 상야등':''}<br>
+      조석 ${c.tideApprox?'근사(캐시 없음)':`${c.tideStation} 기준`} · 수온 ${c.sstSrc==='OM'?'Open-Meteo 격자':`${c.sstStation||''} 관측`}</p>
+    ${rankHTML}
+    <div class="verdict"><span class="score" style="color:${col}">${String(s.value).padStart(2,'0')}</span>
+      <span class="scoreunit">/100</span>
+      <span class="grade" style="color:${col}">${gk}<small>${ge}</small></span></div>
+    <div class="sound${s.gated?' gated':''}">${rows}<div class="sfoot">TRACK = 가중치 · FILL = 현재값</div></div>
+    ${s.gated?`<div class="stamp" style="margin-top:-88px;height:88px"><b>${s.reason}</b></div>`:''}
+    <dl class="grid">
+      <div class="cell"><dt>수온<b>${c.sstSrc}</b></dt><dd>${c.sst.toFixed(1)}<i>℃</i></dd></div>
+      <div class="cell"><dt>24H 변화</dt><dd class="${Math.abs(c.dT)>=2?'warn':''}">${c.dT>0?'+':''}${c.dT.toFixed(1)}<i>℃</i></dd></div>
+      <div class="cell"><dt>물때<b>${rngM.toFixed(1)}m</b></dt><dd>${tideName}<i>${flowName}</i></dd></div>
+      <div class="cell"><dt>물색</dt><dd>${clarName}<i>${(c.clarity*100).toFixed(0)}%</i></dd></div>
+      <div class="cell"><dt>유의파고</dt><dd class="${c.wave>=2.5?'bad':c.wave>=1.8?'warn':''}">${c.wave.toFixed(1)}<i>m</i></dd></div>
+      <div class="cell"><dt>너울주기</dt><dd class="${c.swellP>=9?'bad':c.swellP>=8?'warn':''}">${c.swellP.toFixed(1)}<i>s</i></dd></div>
+      <div class="cell"><dt>풍속</dt><dd class="${c.wind>=8?'warn':''}">${c.wind.toFixed(1)}<i>m/s</i></dd></div>
+      <div class="cell"><dt>기압추세</dt><dd>${c.dP>0?'+':''}${c.dP.toFixed(1)}<i>hPa</i></dd></div>
+    </dl>
+    ${legalHTML(s)}
+    <p class="note">${buildNote(p,c,s)}</p>`;
+}
+
+/* ── 법규 밴드 ── */
+function legalHTML(s){
+  const r = regOf(S.sp), M = regMeta();
+  const sp = SPECIES[S.sp];
+  const stale = M.seed;
+  const closedTxt = r && r.closed
+    ? r.closed.map(([a,b])=>`${mdKo(a)} ~ ${mdKo(b)}`).join(', ')
+    : '없음';
+  const now = s.closed
+    ? `<div class="legalnow">금어기 · ${mdKo(s.closed[0])} ~ ${mdKo(s.closed[1])} 포획 금지</div>` : '';
+  const sizeVal = r && (r.len || r.wt)
+    ? (r.len ? `${r.len}<i>cm</i>` : `${r.wt}<i>g</i>`) : `—`;
+  return `
+  <div class="legal${s.closed?' shut':''}">
+    <div class="legalhead"><span>법규</span>
+      <em>${M.basis || '수산자원관리법 시행령'} · ${M.effective || '기준일 미상'}${stale?' · 미검증':''}</em></div>
+    ${now}
+    <div class="legalgrid">
+      <div><dt>금지체장</dt><dd class="big">${sizeVal}</dd>
+        <p>${regLabel(r)}${r&&r.measure?'':''}</p></div>
+      <div><dt>금어기</dt><dd class="big2">${closedTxt}</dd>
+        <p>법령명 ${r?r.legal:sp.name}</p></div>
+    </div>
+    ${r && r.note ? `<p class="legalnote">${r.note}</p>` : ''}
+    ${r && r.unsure ? `<p class="legalnote warnx">이 값은 교차검증되지 않았습니다. 수집기를 돌려 현행 별표로 갱신하세요.</p>` : ''}
+    <p class="legalnote">시·도 조례로 추가 제한이 있을 수 있습니다. 위반 시 낚시인에게도 과태료가 부과됩니다.
+      <a href="https://www.mof.go.kr/doc/ko/selectDoc.do?menuSeq=1009&bbsSeq=22" target="_blank" rel="noopener">해양수산부 고시 확인</a></p>
+  </div>`;
+}
+
+function buildNote(p,c,s){
+  if(s.reason==='금어기') return `<b>${SPECIES[S.sp].name}는 지금 금어기입니다.</b> 포획·채취가 법으로 금지되며 낚시인에게도 과태료가 부과됩니다. 다른 어종을 선택하세요.`;
+  if(s.reason==='해역 밖') return `<b>${SPECIES[S.sp].name}는 ${SEA_NAME[p.sea]} 워킹 대상이 아닙니다.</b> 분포 해역은 ${SEA_NAME2(SPECIES[S.sp].seas)}입니다.`;
+  if(s.reason==='시즌 아님') return `<b>이번 달은 ${SPECIES[S.sp].name} 접안 시기가 아닙니다.</b> 시즌 게이트가 차단되어 나머지 조건은 계산에 반영되지 않습니다.`;
+  if(s.reason==='출조 위험') return `<b>파고 ${c.wave.toFixed(1)}m · 너울주기 ${c.swellP.toFixed(1)}초.</b> 높이보다 주기가 위험 지표입니다. 갯바위 진입은 물론 방파제 테트라도 접근하지 마세요.`;
+  if(s.reason==='수온 이탈') return `<b>수온 ${c.sst.toFixed(1)}℃는 ${SPECIES[S.sp].name} 활성 범위를 벗어났습니다.</b>`;
+  const lo = Object.keys(s.f).filter(k=>s.f[k]<.4).sort((a,b)=>s.w[b]-s.w[a])[0];
+  const hi = Object.keys(s.f).filter(k=>s.f[k]>.75).sort((a,b)=>s.w[b]-s.w[a])[0];
+  let t='';
+  if(hi) t += `<b>${KEY_KO[hi]}</b> 조건이 이 어종에 잘 맞습니다. `;
+  if(lo) t += `반면 <b>${KEY_KO[lo]}</b>가 발목을 잡고 있습니다. `;
+  if(c.flow<.22) t += `현재 정조 구간이라 입질이 끊기는 시간대입니다. 슬라이더를 2~3시간 밀어보세요. `;
+  if(p.sea==='E') t += `동해라 물때 가중치는 35%로 축소 적용됩니다.`;
+  else if(p.sea==='W') t += `서해는 물때가 지배 변수라 가중치를 135%로 증폭 적용했습니다.`;
+  return t || '전 항목이 평이합니다.';
+}
+
+function render(){
+  const now=new Date(); now.setHours(0,0,0,0);
+  const when=new Date(now.getTime()+S.hour*36e5);
+  const hod=S.hour%24;
+  document.getElementById('clock').textContent =
+    String(Math.floor(hod)).padStart(2,'0')+':'+String(Math.round((hod%1)*60)).padStart(2,'0');
+  document.getElementById('dayoff').textContent = S.hour<24?'오늘':'내일';
+  document.getElementById('today').textContent =
+    `${when.getMonth()+1}/${when.getDate()} ${['일','월','화','수','목','금','토'][when.getDay()]}`;
+  const c = conditions(P_OF(S.pt), S.hour);
+  const dawn=Math.abs(hod-c.sunrise)<1.3, dusk=Math.abs(hod-c.sunset)<1.3;
+  const night=hod<c.sunrise-.6||hod>c.sunset+.6;
+  document.getElementById('phase').textContent = dawn?'여명 매직아워':dusk?'일몰 매직아워':night?'야간':'주간';
+  document.getElementById('sunmeta').textContent =
+    `일출 ${c.sunrise.toFixed(2).replace('.',':').slice(0,5)} · 일몰 ${Math.floor(c.sunset)}:${String(Math.round((c.sunset%1)*60)).padStart(2,'0')}`;
+  drawFeeds(); drawPicker(); drawMap(); drawDetail();
+}
+
+/* ── 이벤트 ── */
+document.querySelector('.modebar').addEventListener('click', e=>{
+  const b=e.target.closest('.modebtn'); if(!b) return;
+  S.mode=b.dataset.mode;
+  document.querySelectorAll('.modebtn').forEach(x=>x.setAttribute('aria-pressed', x.dataset.mode===S.mode));
+  if(S.mode==='region') S.sea = P_OF(S.pt).sea;
+  render();
+});
+document.getElementById('picker').addEventListener('click', e=>{
+  const g=e.target.closest('.gbtn');
+  if(g){
+    S.gear=g.dataset.gear;
+    const pool=Object.entries(SPECIES).filter(([,v])=>S.gear==='all'||v.cat===S.gear);
+    if(!pool.find(([k])=>k===S.sp)) S.sp=pool[0][0];
+    render(); return;
+  }
+  const b=e.target.closest('.chip'); if(!b) return;
+  if(b.dataset.sp) S.sp=b.dataset.sp;
+  if(b.dataset.sea){ S.sea=b.dataset.sea; const f=POINTS.filter(p=>p.sea===S.sea)[0]; if(f) S.pt=f.id; }
+  render();
+});
+document.getElementById('mapsec').addEventListener('click', e=>{
+  const g=e.target.closest('.mk')||e.target.closest('.prow'); if(!g) return;
+  S.pt=g.dataset.pt; render();
+});
+document.getElementById('mapsec').addEventListener('keydown', e=>{
+  const g=e.target.closest('.mk'); if(!g||(e.key!=='Enter'&&e.key!==' ')) return;
+  e.preventDefault(); S.pt=g.dataset.pt; render();
+});
+document.getElementById('detail').addEventListener('click', e=>{
+  const r=e.target.closest('.rrow'); if(!r) return; S.sp=r.dataset.sp; render();
+});
+document.getElementById('hour').addEventListener('input', e=>{ S.hour=+e.target.value; render(); });
+
+/* ══════════════════════════════════════════════════════════════
+   8. 네이티브 기능 — 화면 유지 · 위치 · 버전
+   ── 스코어링에는 관여하지 않는다. 네이티브 API 는 이 블록과 부팅에만 있다.
+   ══════════════════════════════════════════════════════════════ */
+
+/* 화면 꺼짐 방지. Screen Wake Lock 은 WebView 표준이라 플러그인이 필요 없고
+   웹에서도 그대로 동작한다. 화면이 가려지면 OS 가 자동 해제하므로 복귀 시 재획득. */
+const KEEP = { on:true, lock:null };
+async function applyKeepAwake(){
+  if(!('wakeLock' in navigator)) return;
+  try{
+    if(KEEP.on && !KEEP.lock && document.visibilityState === 'visible'){
+      KEEP.lock = await navigator.wakeLock.request('screen');
+      KEEP.lock.addEventListener('release', ()=>{ KEEP.lock = null; });
+    }else if(!KEEP.on && KEEP.lock){
+      await KEEP.lock.release(); KEEP.lock = null;
+    }
+  }catch(e){ /* 절전 모드 등에서 거부될 수 있다 — 무시 */ }
+}
+document.addEventListener('visibilitychange', ()=>{
+  if(document.visibilityState === 'visible') applyKeepAwake();
+});
+
+/* GPS 최근접 포인트. 30km 넘게 떨어져 있으면 고르지 않고 사용자가 정하게 둔다.
+   권한을 거부해도 앱은 그대로 동작해야 한다.                                  */
+const GEO = { state:'idle', label:'' };
+const kmBetween = (a,b) =>
+  Math.hypot((a.lat-b.lat)*111, (a.lon-b.lon)*111*Math.cos(a.lat*Math.PI/180));
+
+async function currentPos(){
+  if(NATIVE && CAP.Geolocation){
+    const perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
+    if(!perm || perm.location === 'prompt' || perm.location === 'prompt-with-rationale'){
+      await CAP.Geolocation.requestPermissions({permissions:['location']}).catch(()=>null);
+    }
+    const p = await CAP.Geolocation.getCurrentPosition(
+      {enableHighAccuracy:false, timeout:9000, maximumAge:300000});
+    return {lat:p.coords.latitude, lon:p.coords.longitude};
+  }
+  return await new Promise((res, rej)=>{
+    if(!navigator.geolocation) return rej(new Error('no geolocation'));
+    navigator.geolocation.getCurrentPosition(
+      p => res({lat:p.coords.latitude, lon:p.coords.longitude}), rej,
+      {enableHighAccuracy:false, timeout:9000, maximumAge:300000});
+  });
+}
+
+async function locateNearest(auto){
+  GEO.state = 'busy'; drawToolbar();
+  try{
+    const me = await currentPos();
+    let best = null, bd = 1e9;
+    for(const p of POINTS){ const d = kmBetween(me, p); if(d < bd){ bd = d; best = p; } }
+    if(!best || bd > 30){
+      GEO.state = 'far';
+      GEO.label = best ? `${best.name} ${Math.round(bd)}km` : '';
+    }else{
+      S.pt = best.id;
+      if(S.mode === 'region') S.sea = best.sea;
+      GEO.state = 'ok';
+      GEO.label = `${best.name} ${bd < 1 ? '<1' : Math.round(bd)}km`;
+      render();
+    }
+  }catch(e){
+    GEO.state = auto ? 'idle' : 'denied';
+  }
+  drawToolbar();
+}
+
+/* 사이드로딩이라 자동 업데이트가 없다. 새 버전이 있다는 사실만 알리고
+   설치는 사용자가 한다. 자동 업데이터는 개인용 앱에 과잉이다. */
+const VER = { current:'__APP_VERSION__', latest:null, url:null };
+async function checkUpdate(){
+  if(NATIVE && CAP.App){
+    try{ VER.current = (await CAP.App.getInfo()).version || VER.current; }catch(e){}
+  }
+  if(VER.current.indexOf('__') === 0) VER.current = '—';
+  drawToolbar();
+  if(!NET.online || !/^[\w.-]+\/[\w.-]+$/.test(CFG.REPO)) return;
+  try{
+    const r = await fetch(`https://api.github.com/repos/${CFG.REPO}/releases/latest`,
+                          {headers:{Accept:'application/vnd.github+json'}});
+    if(!r.ok) return;
+    const j = await r.json();
+    const tag = String(j.tag_name || '').replace(/^v/, '');
+    if(tag && tag !== VER.current){ VER.latest = tag; VER.url = j.html_url; }
+    drawToolbar();
+  }catch(e){}
+}
+
+function drawToolbar(){
+  const el = document.getElementById('toolbar');
+  if(!NATIVE){ el.hidden = true; return; }
+  el.hidden = false;
+  const geoTxt = GEO.state === 'busy'   ? '위치 확인중'
+               : GEO.state === 'ok'     ? GEO.label
+               : GEO.state === 'far'    ? `30km 밖 · ${GEO.label}`
+               : GEO.state === 'denied' ? '위치 권한 없음'
+               : '내 위치';
+  const ver = VER.latest
+    ? `<a class="tver up" href="${VER.url}" target="_blank" rel="noopener">v${VER.current} → v${VER.latest}</a>`
+    : `<span class="tver">v${VER.current}</span>`;
+  el.innerHTML =
+      `<button class="tbtn" id="btn-geo"${GEO.state === 'busy' ? ' disabled' : ''}>◎ ${geoTxt}</button>`
+    + `<button class="tbtn" id="btn-keep" aria-pressed="${KEEP.on}">화면유지 ${KEEP.on ? 'ON' : 'OFF'}</button>`
+    + ver;
+}
+
+function drawOffbar(){
+  const el = document.getElementById('offbar');
+  if(NET.online || !DATA.marine){ el.hidden = true; return; }
+  const hrs = STAMP.om ? Math.floor((Date.now()-STAMP.om)/36e5) : null;
+  el.hidden = false;
+  el.textContent = hrs != null ? `오프라인 · ${hrs}시간 전 예보` : '오프라인 · 캐시 데이터';
+}
+
+document.getElementById('toolbar').addEventListener('click', e=>{
+  if(e.target.closest('#btn-geo')) locateNearest(false);
+  else if(e.target.closest('#btn-keep')){
+    KEEP.on = !KEEP.on;
+    Store.set(K.keep, KEEP.on);
+    applyKeepAwake(); drawToolbar();
+  }
+});
+
+/* ── 부팅: 캐시 → 렌더 → 네트워크 갱신 → 재렌더 ─────────────────
+   절대 네트워크를 기다리며 빈 화면을 띄우지 않는다. 현장 앱이다. */
+document.getElementById('hour').value = S.hour;
+render();
+
+async function boot(){
+  if(NATIVE){
+    if(CAP.StatusBar){
+      try{ await CAP.StatusBar.setBackgroundColor({color:'#071A21'}); }catch(e){}
+      try{ await CAP.StatusBar.setStyle({style:'DARK'}); }catch(e){}
+    }
+    const saved = await Store.get(K.keep);
+    if(saved !== null && saved !== undefined) KEEP.on = !!saved;
+  }
+  drawToolbar(); applyKeepAwake();
+
+  await readNetwork();
+  await hydrate();                 // 1. 캐시에서 즉시 — 오프라인이어도 뜬다
+  if(!NET.online){
+    // 오프라인이면 갱신 시도가 없으므로 폴백이 확정이다.
+    // `···`(로딩중)으로 남겨두면 영영 기다리는 것처럼 보인다.
+    for(const k of ['tide','sst','reg']) if(FEED[k] === 'pending') FEED[k] = 'fallback';
+    if(FEED.om === 'pending') FEED.om = 'err';
+  }
+  render(); drawOffbar();
+  if(NATIVE && CAP.SplashScreen){ try{ await CAP.SplashScreen.hide(); }catch(e){} }
+
+  if(NET.online){                  // 2. 백그라운드 갱신
+    await refresh();
+    render();
+  }
+  drawOffbar();
+
+  if(NATIVE){                      // 3. 부수 기능 — 실패해도 앱에 영향 없음
+    locateNearest(true);
+    checkUpdate();
+  }
+}
+boot();
+
+/* 네트워크가 돌아오거나 앱으로 복귀하면 조용히 다시 시도한다 */
+async function onWake(){
+  const was = NET.online;
+  await readNetwork();
+  drawOffbar();
+  if(NET.online && !was){ await refresh(); render(); drawOffbar(); }
+}
+if(NATIVE && CAP.Network) CAP.Network.addListener('networkStatusChange', onWake);
+else { window.addEventListener('online', onWake); window.addEventListener('offline', onWake); }
+if(NATIVE && CAP.App) CAP.App.addListener('appStateChange', st=>{
+  if(st.isActive){ applyKeepAwake(); onWake(); }
+});
+</script>
+</body>
+</html>

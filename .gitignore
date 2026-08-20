@@ -1,0 +1,38 @@
+# ── Node / Capacitor ────────────────────────────────
+node_modules/
+package-lock.json.bak
+
+# android/ 는 CI 가 매 빌드마다 `npx cap add android` 로 새로 만든다.
+# 커밋하면 patch-android.mjs 와 이중 관리가 되어 어긋난다.
+android/
+ios/
+
+# ── 서명 키 — 유출되면 앱을 위조당한다. 절대 커밋 금지 ──
+*.keystore
+*.jks
+*.keystore.b64
+keystore.properties
+
+# ── 빌드 산출물 ─────────────────────────────────────
+*.apk
+*.aab
+.gradle/
+build/
+
+# ── 번들 폰트 (npm 패키지에서 빌드 시 복사) ──────────
+www/fonts/
+
+# ── OS / 편집기 ─────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.iml
+
+# ── 파이썬 ──────────────────────────────────────────
+__pycache__/
+*.pyc
+.venv/
+
+# 빌드 산출물 모음
+dist/

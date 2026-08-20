@@ -1,0 +1,29 @@
+{
+  "appId": "kr.local.shorefishing",
+  "appName": "워킹 조건",
+  "webDir": "www",
+  "android": {
+    "backgroundColor": "#071A21",
+    "allowMixedContent": false,
+    "webContentsDebuggingEnabled": false
+  },
+  "server": {
+    "androidScheme": "https"
+  },
+  "plugins": {
+    "CapacitorHttp": { "enabled": true },
+    "SplashScreen": {
+      "backgroundColor": "#071A21",
+      "showSpinner": false,
+      "launchAutoHide": false,
+      "launchShowDuration": 3000,
+      "androidSplashResourceName": "splash",
+      "androidScaleType": "CENTER_CROP"
+    },
+    "StatusBar": {
+      "style": "DARK",
+      "backgroundColor": "#071A21",
+      "overlaysWebView": false
+    }
+  }
+}

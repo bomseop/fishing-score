@@ -157,6 +157,31 @@ jobs:
             ./gradlew assembleDebug --no-daemon
           fi
 
+      - name: 매니페스트 확인
+        # 권한 문제는 '무엇이 실제로 선언됐는가'를 봐야 끝난다.
+        # 소스가 아니라 AGP 가 병합한 최종 결과를 찍는다. 플러그인이 넣은 것까지 여기 다 있다.
+        if: always()
+        run: |
+          echo "### 매니페스트 권한" >> $GITHUB_STEP_SUMMARY
+          SRC=android/app/src/main/AndroidManifest.xml
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**앱 소스 (patch-android 적용 후)**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          grep -o 'android:name="android.permission[^"]*"[^/]*' "$SRC" >> $GITHUB_STEP_SUMMARY || echo "(없음)" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+
+          MERGED=$(find android/app/build/intermediates -name AndroidManifest.xml -path '*merged*' 2>/dev/null | head -1)
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**병합 결과 (APK 에 실제로 들어간 것)**" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          if [ -n "$MERGED" ]; then
+            grep -o 'android.permission\.[A-Z_]*' "$MERGED" | sort -u >> $GITHUB_STEP_SUMMARY
+          else
+            echo "(병합 매니페스트를 찾지 못함)" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          cat $GITHUB_STEP_SUMMARY | tail -30
+
       - name: 산출물 정리
         id: out
         run: |

@@ -24,13 +24,13 @@ jobs:
     timeout-minutes: 50
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # PAT 이 있으면 그걸로 체크아웃해야 push 도 PAT 으로 나간다.
           # 봇 커밋만 쌓이면 60일 후 스케줄이 자동 비활성화되므로 PAT 을 권장.
           token: ${{ secrets.PAT || github.token }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
@@ -94,6 +94,10 @@ jobs:
         run: |
           git config user.name  "data-bot"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # 수집기가 하나도 못 돌면(인증키 미등록 등) 이 디렉터리들이 없다.
+          # 그 상태로 git add 하면 pathspec 오류로 죽어서, 키가 없다는 사실이
+          # "워크플로 고장"으로 잘못 보인다. 빈 디렉터리는 어차피 커밋되지 않는다.
+          mkdir -p data .cache
           git add -A data .cache
           if git diff --quiet --cached; then
             echo "변경 없음"

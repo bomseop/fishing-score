@@ -22,19 +22,19 @@ jobs:
     timeout-minutes: 30
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       # Capacitor 7 은 JDK 21 을 쓴다. 17 로는 AGP 가 뜨지 않는다.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '21'
 
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@v6
 
       - name: 의존성 설치
         # package-lock.json 을 커밋했다면 `npm ci` 로 바꾸는 편이 재현성이 좋다.
@@ -136,7 +136,7 @@ jobs:
             echo "- 크기 $(du -h "dist/$NAME" | cut -f1)"
           } >> $GITHUB_STEP_SUMMARY
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.out.outputs.name }}
           path: dist/*.apk
@@ -144,7 +144,7 @@ jobs:
 
       - name: 릴리스 업로드
         if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: dist/*.apk
           generate_release_notes: true

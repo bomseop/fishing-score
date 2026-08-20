@@ -65,8 +65,28 @@ def fresh(ts: str | None) -> bool:
     return bool(t and (now_kst() - t).total_seconds() < STALE_HOURS * 3600)
 
 
+def sensorless(wtem: float, saln) -> bool:
+    """수온계가 없는 지점은 관측값 대신 0.0 을 돌려준다.
+
+    태안·인천송도·광양 등은 `wtem: 0.0` 과 `slntQty: 0.0` 이 함께 온다.
+    바닷물 염분이 0 psu 일 수는 없으므로 이 조합이 '센서 없음'의 지표다.
+    (군산은 `wtem: 27.1, slntQty: 29.5` 처럼 둘 다 실측이 온다.)
+
+    이걸 걸러내지 않으면 8월에 0℃ 가 최근접 관측소로 잡히고, 프론트의
+    치사수온 게이트가 걸려 그 일대 전 어종이 조용히 0점이 된다.
+    실제로 어는점 근처인 겨울 서해 천수만이라면 염분은 정상값이 오므로
+    그 경우는 그대로 통과한다.
+    """
+    if abs(wtem) > 0.05:
+        return False
+    try:
+        return saln is None or abs(float(saln)) < 0.05
+    except (TypeError, ValueError):
+        return True
+
+
 def latest_wtem(rows: list[dict]) -> tuple[float, str] | None:
-    """관측 행들 중 수온이 유효한 가장 최근 값."""
+    """관측 행들 중 수온이 유효한 가장 최근 값. 없으면 None."""
     best = None
     for r in rows:
         v = r.get("wtem")
@@ -77,6 +97,8 @@ def latest_wtem(rows: list[dict]) -> tuple[float, str] | None:
         except (TypeError, ValueError):
             continue
         if not (-3 <= t <= 35):        # 센서 이상값 제거
+            continue
+        if sensorless(t, r.get("slntQty")):
             continue
         when = parse_kst(r.get("obsrvnDt"))
         if not when:
@@ -92,6 +114,7 @@ def collect_khoa(key: str) -> list[dict]:
     yday = f"{now_kst() - dt.timedelta(days=1):%Y%m%d}"
     out: list[dict] = []
     denied = False
+    no_sensor: list[str] = []
 
     for code, (name, lat, lon) in STATIONS.items():
         rows = items(get(EP_DT_RECENT, key, {
@@ -112,7 +135,10 @@ def collect_khoa(key: str) -> list[dict]:
             continue
         denied = False
         pick = latest_wtem(rows)
-        if not pick or not fresh(pick[1]):
+        if not pick:
+            no_sensor.append(name)
+            continue
+        if not fresh(pick[1]):
             continue
         out.append({"name": name, "lat": round(lat, 5), "lon": round(lon, 5),
                     "temp": round(pick[0], 1), "agency": "KHOA", "obs": pick[1]})
@@ -120,6 +146,9 @@ def collect_khoa(key: str) -> list[dict]:
     if denied and not out:
         log("  전 지점 응답 없음 — data.go.kr 에서 '조위관측소 최신 관측데이터'(15155508)")
         log("  활용신청이 되어 있는지 확인하세요.")
+    if no_sensor:
+        # 여기가 갑자기 늘면 관측망이 바뀐 것이다. 조용히 넘어가면 안 된다.
+        log(f"  수온계 없음 {len(no_sensor)}개소: {', '.join(no_sensor)}")
     log(f"  유효 {len(out)}건")
     return out
 

@@ -245,8 +245,8 @@ footer strong{color:var(--amber);font-weight:500}
 
 <footer>
   파고·너울·바람·해면수온 : Open-Meteo (실시간)<br>
-  조석 : 국립해양조사원 KHOA — 연 1회 선계산 캐시<br>
-  연안 수온 : 국립수산과학원 NIFS / KHOA 조위관측소 — 3시간 주기 수집<br><br>
+  조석 : 국립해양조사원 조석예보(고·저조) — 연 1회 선계산 캐시<br>
+  연안 수온 : 국립해양조사원 조위관측소 실측 — 6시간 주기 수집<br><br>
   <strong>안전</strong> 갯바위·방파제 구명조끼 착용은 법적 의무<br>
   <strong>법규</strong> 금어기 · 금지체장 · 출입통제구역은 출조 전 별도 확인
 </footer>
@@ -488,7 +488,7 @@ const POINTS = [
    3. 데이터 수집
       · Open-Meteo  : 브라우저 직접 호출 (키 없음 / CORS 허용 / 다중좌표 배치)
       · KHOA 조석   : build_tides.py 가 만든 정적 JSON
-      · NIFS 수온   : collect_sst.py 가 만든 정적 JSON (없으면 Open-Meteo SST 사용)
+      · 연안 수온   : collect_sst.py 가 만든 정적 JSON (없으면 Open-Meteo SST 사용)
    ══════════════════════════════════════════════════════════════ */
 const OM_MARINE = 'https://marine-api.open-meteo.com/v1/marine';
 const OM_FCST   = 'https://api.open-meteo.com/v1/forecast';
@@ -500,7 +500,7 @@ const STAMP = { om:0, sst:0, reg:0 };
 
 /* ══ 네이티브 브리지 · 오프라인 캐시 ═══════════════════════════
    앱은 GitHub Pages 의 정적 JSON 을 읽고, 웹은 같은 파일을 상대경로로 읽는다.
-   KHOA·NIFS·법령 인증키는 APK 에 넣지 않는다 — 디컴파일하면 그대로 나온다.
+   공공데이터포털·법령 인증키는 APK 에 넣지 않는다 — 디컴파일하면 그대로 나온다.
    인증키가 없는 Open-Meteo 만 앱에서 직접 부른다.                          */
 const CFG = {
   REMOTE: '__PAGES_URL__',   // CI 가 실제 GitHub Pages 주소로 치환한다
@@ -712,7 +712,7 @@ function tideApprox(pt, hourAbs){
            rising:Math.cos(phase*2*Math.PI)<0, approx:true };
 }
 
-/* ── 연안 수온: NIFS/KHOA 관측 우선, 없으면 Open-Meteo 격자 SST ── */
+/* ── 연안 수온: 조위관측소 실측 우선, 없으면 Open-Meteo 격자 SST ── */
 function sstAt(pt, omSst){
   if(DATA.sst && DATA.sst.stations){
     let best=null, bd=1e9;
@@ -721,7 +721,7 @@ function sstAt(pt, omSst){
       if(d<bd){ bd=d; best=s; }
     }
     if(best && bd<=35 && best.temp!=null)
-      return { v:best.temp, src:best.agency||'NIFS', dist:bd, station:best.name };
+      return { v:best.temp, src:best.agency||'KHOA', dist:bd, station:best.name };
   }
   return { v:omSst, src:'OM', dist:null };
 }
@@ -841,7 +841,7 @@ const grade=v=>v>=72?['적극 출조','PRIME']:v>=52?['해볼 만함','FAIR']:v>
 const P_OF=id=>POINTS.find(p=>p.id===id);
 
 function drawFeeds(){
-  const L=[['om','WAVE·WIND·SST'],['tide','KHOA TIDE'],['sst','NIFS SST'],['reg','법규 별표']];
+  const L=[['om','WAVE·WIND·SST'],['tide','KHOA TIDE'],['sst','연안 수온'],['reg','법규 별표']];
   document.getElementById('feeds').innerHTML = L.map(([k,label])=>{
     const st=FEED[k];
     const cls = st==='ok'?'ok' : st==='pending'?'' : st==='stale'?'err'

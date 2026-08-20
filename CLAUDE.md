@@ -27,7 +27,8 @@ UI 문구에 "확률", "확률(%)", "적중률" 같은 표현을 쓰지 말 것.
 www/index.html        프론트엔드 전체 (단일 파일, 런타임 의존성 없음)
 index.html            루트 리다이렉트 → ./www/ (Pages 주소 유지용)
 build_tides.py        KHOA 조석예보 → data/tide-<YEAR>.json
-collect_sst.py        KHOA/NIFS 수온 → data/sst-latest.json
+khoa_api.py           포털 API 공용 계층 (엔드포인트·인증키·지점표)
+collect_sst.py        조위관측소 수온 → data/sst-latest.json
 sync_regulations.py   법령 별표1·2   → data/regulations.json
 capacitor.config.json Capacitor 설정 (.ts 아님 — TS 툴체인 불필요)
 scripts/              폰트 번들 · 설정 주입 · android 패치 · 아이콘 생성
@@ -113,14 +114,19 @@ level(t) = (h₁+h₂)/2 + (h₁-h₂)/2 · cos(πτ)
 |---|---|---|---|
 | 파고·너울주기·바람·기압·일출몰 | Open-Meteo | 클라이언트 직접 호출 | 없음 (필수) |
 | 격자 해면수온 | Open-Meteo Marine | 클라이언트 직접 호출 | — |
-| 조석 | KHOA `tideObsPreTab` | 연 1회 선계산 정적 JSON | 달 위상 근사 |
-| 연안 실측 수온 | KHOA `tideObsRecent` + NIFS | 6시간 주기 정적 JSON | Open-Meteo 격자 |
+| 조석 | data.go.kr 1192136 `tideFcstHghLw` | 연 1회 선계산 정적 JSON | 달 위상 근사 |
+| 연안 실측 수온 | data.go.kr 1192136 `dtRecent` | 6시간 주기 정적 JSON | Open-Meteo 격자 |
 | 금어기·금지체장 | 국가법령정보센터 OPEN API | 시행일 변경 시 재수집 | 내장 씨드값 |
 
 **Open-Meteo는 인증키 없음 + CORS 허용 + 다중 좌표 배치 요청 지원.**
 41개 포인트 전체가 요청 2회로 끝난다. 이 특성을 유지할 것.
 
-**KHOA·NIFS·법령은 CORS가 막혀 있다.** 브라우저에서 직접 못 부른다.
+**구 바다누리 OpenAPI(`khoa.go.kr/api/oceangrid`)는 2026-04-01 자로 종료됐다.**
+조석·수온은 공공데이터포털(data.go.kr) 기관코드 1192136 으로 이전됐고, 인증키는
+계정당 하나(`DATA_GO_KR_KEY`)라 두 API가 같은 값을 쓴다. 엔드포인트 정의는
+`khoa_api.py` 한 곳에 모여 있다 — 수집기가 직접 URL을 갖지 않는다.
+
+**포털 API와 법령은 CORS가 막혀 있다.** 브라우저에서 직접 못 부른다.
 그래서 수집기가 정적 JSON을 떨구고 프론트가 읽는다. 백엔드 서버 없음.
 
 ### 신선도 검사

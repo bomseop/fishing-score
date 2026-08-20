@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-build_tides.py — KHOA 조석예보 연간 선계산
+build_tides.py — 조석예보 연간 선계산
 
 프론트엔드가 읽는 data/tide-<YEAR>.json 을 생성한다.
 연 1회만 돌리면 되고, 이미 완성된 연도는 --force 없이는 다시 만들지 않는다.
@@ -8,18 +8,19 @@ build_tides.py — KHOA 조석예보 연간 선계산
   python build_tides.py                  # 올해분, 없으면 생성
   python build_tides.py --year 2027      # 특정 연도
   python build_tides.py --force          # 강제 재생성
-  python build_tides.py --budget 3000    # 이번 실행에서 3000회만 호출하고 중단
-  python build_tides.py --stations DT_0001,DT_0002
+  python build_tides.py --budget 1200    # 이번 실행에서 1200회만 호출하고 중단
+  python build_tides.py --stations DT_0001,DT_0018
+  python build_tides.py --scan           # 지점표 재스캔 (khoa_api.STATIONS 갱신용)
 
 환경변수:
-  KHOA_KEY   바다누리 해양정보 서비스 인증키
-             https://www.khoa.go.kr/oceangrid/khoa/koofs.do 에서 발급
+  DATA_GO_KR_KEY   공공데이터포털 일반 인증키
+                   https://www.data.go.kr/data/15156018/openapi.do 에서 활용신청
 
 호출량 주의:
-  일자 × 관측소 단위 호출이라 40개소 × 365일 = 14,600건.
-  개발계정 일일 한도(보통 10,000)를 넘으므로 --budget 으로 쪼개 받는다.
-  체크포인트가 .cache/ 에 남으므로 여러 번에 나눠 실행하면 이어서 받는다.
-  GitHub Actions 에서는 하루 한 번 --budget 3000 으로 돌리면 5일 만에 완성된다.
+  지점 × 날짜 단위 호출이라 46개소 × 365일 = 약 16,800건.
+  개발계정 일일 한도가 10,000 이라 한 번에 못 받는다. --budget 으로 쪼개 받고
+  체크포인트를 .cache/ 에 남겨 다음 실행이 이어받는다.
+  Actions 에서 하루 4회 × 1,200회면 3~4일에 한 해가 완성된다.
 """
 
 from __future__ import annotations
@@ -27,86 +28,34 @@ from __future__ import annotations
 import argparse
 import datetime as dt
 import json
-import os
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import urlopen
-from urllib.error import HTTPError, URLError
 
-KHOA_BASE = "http://www.khoa.go.kr/api/oceangrid"
-EP_STATIONS = f"{KHOA_BASE}/ObsServiceObj/search.do"      # 관측소 목록
-EP_TIDE_PRE = f"{KHOA_BASE}/tideObsPreTab/search.do"      # 조석예보(고·저조)
+from khoa_api import EP_TIDE_FCST, STATIONS, get, items, log, scan_stations, service_key
 
 OUT_DIR = Path("data")
 CKPT_DIR = Path(".cache")
 RATE_SLEEP = 0.12          # 초 / 호출
-MAX_RETRY = 3
 
-# 워킹 포인트가 붙어 있는 연안 조위관측소만 추린다.
-# 비우면 ObsServiceObj 응답의 조위관측소 전체를 사용.
+# 비우면 khoa_api.STATIONS 전체를 사용한다.
 STATION_WHITELIST: list[str] = []
 
 
-def log(msg: str) -> None:
-    print(f"[{dt.datetime.now():%H:%M:%S}] {msg}", flush=True)
+def parse_events(rows: list[dict]) -> list[list]:
+    """조석예보 응답 → [["2026-08-20T01:59", 238], ...]
 
-
-def api_get(url: str, params: dict) -> dict:
-    q = urlencode(params)
-    for attempt in range(1, MAX_RETRY + 1):
-        try:
-            with urlopen(f"{url}?{q}", timeout=20) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as e:
-            if attempt == MAX_RETRY:
-                raise
-            wait = 2 ** attempt
-            log(f"  재시도 {attempt}/{MAX_RETRY} ({e}) — {wait}s 대기")
-            time.sleep(wait)
-    raise RuntimeError("unreachable")
-
-
-def fetch_stations(key: str) -> dict[str, dict]:
-    """조위관측소 목록. 반환 스키마는 프론트가 그대로 쓴다."""
-    log("관측소 목록 조회")
-    js = api_get(EP_STATIONS, {"ServiceKey": key, "ServiceType": "json"})
-    rows = js.get("result", {}).get("data", [])
-    out: dict[str, dict] = {}
-    for r in rows:
-        code = r.get("obs_post_id") or r.get("obs_code")
-        name = r.get("obs_post_name") or r.get("obs_object")
-        lat, lon = r.get("obs_lat"), r.get("obs_lon")
-        if not (code and lat and lon):
-            continue
-        # 조위관측소(DT_) 만. 부이(TW_/KG_) 등은 조석예보가 없다.
-        if not str(code).startswith("DT_"):
-            continue
-        if STATION_WHITELIST and code not in STATION_WHITELIST:
-            continue
-        out[code] = {"name": name, "lat": round(float(lat), 5), "lon": round(float(lon), 5)}
-    log(f"  조위관측소 {len(out)}개소")
-    return out
-
-
-def parse_events(js: dict) -> list[list]:
+    `predcTdlvVl` 은 cm. 고/저조 구분(`extrSe`)은 버린다 — 프론트가 값의
+    대소로 판단하고, 사인 보간은 이웃 두 극값만 있으면 성립한다.
     """
-    tideObsPreTab 응답 → [["2026-08-20T03:12", 912], ...]
-    수위 단위는 cm. 고/저조 구분은 값의 대소로 프론트가 알아서 판단하므로 버린다.
-    """
-    rows = js.get("result", {}).get("data", [])
     out = []
     for r in rows:
-        t = r.get("tph_time")          # "2026-08-20 03:12:00"
-        h = r.get("tph_level")         # "912"
+        t = r.get("predcDt")            # "2026-08-20 01:59"
+        h = r.get("predcTdlvVl")        # 238.0
         if not t or h is None:
             continue
         try:
-            ts = dt.datetime.strptime(t.strip()[:16], "%Y-%m-%d %H:%M")
-        except ValueError:
-            continue
-        try:
+            ts = dt.datetime.strptime(str(t).strip()[:16], "%Y-%m-%d %H:%M")
             lvl = int(round(float(h)))
         except (TypeError, ValueError):
             continue
@@ -125,9 +74,12 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
         log(f"{out_path} 이미 존재. --force 없이는 건너뜀.")
         return 0
 
-    stations = fetch_stations(key)
+    codes = [c for c in STATIONS if not STATION_WHITELIST or c in STATION_WHITELIST]
+    stations = {c: {"name": STATIONS[c][0], "lat": STATIONS[c][1], "lon": STATIONS[c][2]}
+                for c in codes}
     if not stations:
-        sys.exit("관측소를 하나도 못 받았습니다. 인증키와 응답 필드명을 확인하세요.")
+        sys.exit("대상 지점이 없습니다. --stations 값을 확인하세요.")
+    log(f"조석예보 지점 {len(stations)}개소")
 
     # 체크포인트 복구
     events: dict[str, list] = {}
@@ -141,7 +93,6 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
     start = dt.date(year, 1, 1)
     end = dt.date(year, 12, 31)
     total = len(stations) * ((end - start).days + 1)
-    n = 0
     spent = 0
     exhausted = False
 
@@ -151,27 +102,26 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
             encoding="utf-8")
 
     try:
-        for code in stations:
+        for code in codes:
             if exhausted:
                 break
             events.setdefault(code, [])
             day = start
             while day <= end:
                 tag = f"{code}:{day:%Y%m%d}"
-                n += 1
                 if tag in done:
                     day += dt.timedelta(days=1)
                     continue
                 if budget and spent >= budget:
                     exhausted = True
                     break
-                js = api_get(EP_TIDE_PRE, {
-                    "ServiceKey": key,
-                    "ObsCode": code,
-                    "Date": f"{day:%Y%m%d}",
-                    "ResultType": "json",
-                })
-                events[code].extend(parse_events(js))
+                rows = items(get(EP_TIDE_FCST, key, {
+                    "obsCode": code,
+                    "reqDate": f"{day:%Y%m%d}",
+                    "type": "json",
+                    "numOfRows": "100",
+                }))
+                events[code].extend(parse_events(rows))
                 done.add(tag)
                 spent += 1
                 if spent % 200 == 0:
@@ -187,8 +137,7 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
 
     if exhausted:
         save_ckpt()
-        pct = len(done) / total
-        log(f"예산 {budget}회 소진. 진행률 {pct:.1%} ({len(done)}/{total})")
+        log(f"예산 {budget}회 소진. 진행률 {len(done)/total:.1%} ({len(done)}/{total})")
         log("다음 실행에서 이어서 받습니다.")
         return 2
 
@@ -202,7 +151,16 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
             uniq.append(e)
         events[code] = uniq
 
-    # 관측소별 정규화 상수를 여기서 미리 계산해 프론트 부팅을 가볍게 만든다.
+    # 빈 지점은 내보내지 않는다. 프론트의 최근접 탐색이 빈 지점을 고르면
+    # 물때 팩터가 통째로 죽는다 — 차라리 다음 지점으로 넘어가게 둔다.
+    empty = [c for c, ev in events.items() if len(ev) < 2]
+    for c in empty:
+        events.pop(c)
+        stations.pop(c, None)
+    if empty:
+        log(f"이벤트가 없어 제외한 지점 {len(empty)}개: {', '.join(empty)}")
+
+    # 관측소별 정규화 상수를 미리 계산해 프론트 부팅을 가볍게 만든다.
     max_rate, max_range = {}, {}
     for code, ev in events.items():
         mr = mR = 0.0
@@ -219,7 +177,7 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
     payload = {
         "year": year,
         "generated": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
-        "source": "KHOA tideObsPreTab",
+        "source": "data.go.kr 1192136 tideFcstHghLw",
         "unit": {"level": "cm", "rate": "cm/h"},
         "stations": stations,
         "events": events,
@@ -241,14 +199,21 @@ def main() -> None:
     ap.add_argument("--budget", type=int, default=0,
                     help="이번 실행의 최대 API 호출 수 (0=무제한)")
     ap.add_argument("--stations", type=str, default="")
+    ap.add_argument("--scan", action="store_true",
+                    help="지점표를 다시 스캔해 출력한다 (khoa_api.STATIONS 갱신용)")
     args = ap.parse_args()
+
+    key = service_key()
+
+    if args.scan:
+        found = scan_stations(key)
+        log(f"{len(found)}개소 발견")
+        for c, (n, la, lo) in sorted(found.items()):
+            print(f'    "{c}": ("{n}", {la:.5f}, {lo:.5f}),')
+        sys.exit(0)
 
     if args.stations:
         STATION_WHITELIST.extend(s.strip() for s in args.stations.split(",") if s.strip())
-
-    key = os.environ.get("KHOA_KEY", "").strip()
-    if not key:
-        sys.exit("KHOA_KEY 환경변수가 없습니다.")
 
     sys.exit(build(args.year, key, args.force, args.budget))
 

@@ -6,8 +6,9 @@
 ```
 www/index.html        프론트엔드 (런타임 의존성 없음, 정적 호스팅)
 index.html            루트 리다이렉트 → ./www/
-build_tides.py        KHOA 조석예보 → data/tide-<YEAR>.json     (연 1회)
-collect_sst.py        KHOA/NIFS 수온 → data/sst-latest.json     (6시간 주기)
+khoa_api.py           공공데이터포털 API 공용 계층 (엔드포인트·인증키·지점표)
+build_tides.py        조석예보 고·저조 → data/tide-<YEAR>.json  (연 1회)
+collect_sst.py        조위관측소 수온  → data/sst-latest.json   (6시간 주기)
 sync_regulations.py   법령 별표1·2  → data/regulations.json     (시행일 변경 시)
 data/                 위 스크립트들의 출력
 scripts/              앱 빌드 보조 (폰트 번들 · 설정 주입 · android 패치 · 아이콘)
@@ -31,14 +32,14 @@ assets/               아이콘·스플래시 원본
 |---|---|---|---|
 | 파고·너울주기·해면수온 | Open-Meteo Marine | 브라우저 직접 호출 | 실시간 |
 | 풍속·풍향·기압·일출몰 | Open-Meteo Forecast | 브라우저 직접 호출 | 실시간 |
-| 조석 고·저조 | KHOA `tideObsPreTab` | 선계산 정적 JSON | 연 1회 |
-| 연안 실측 수온 | KHOA `tideObsRecent` (+NIFS) | 수집 정적 JSON | 3시간 |
+| 조석 고·저조 | data.go.kr `tideFcstHghLw` | 선계산 정적 JSON | 연 1회 |
+| 연안 실측 수온 | data.go.kr `dtRecent` | 수집 정적 JSON | 6시간 |
 | 금어기·금지체장 | 국가법령정보센터 OPEN API | 수집 정적 JSON | 주 1회 확인 |
 
 Open-Meteo는 인증키가 없고 CORS를 허용하며 **다중 좌표 배치 요청**을 지원한다.
 41개 포인트 전체가 요청 2회(Marine + Forecast)로 끝난다.
 
-KHOA와 NIFS는 CORS가 막혀 있어 브라우저에서 직접 못 부른다. 그래서 수집기가
+공공데이터포털 API는 CORS가 막혀 있고 인증키가 필요해 브라우저에서 직접 못 부른다. 그래서 수집기가
 정적 JSON을 떨구고 프론트는 같은 오리진에서 읽는다. 백엔드 서버가 필요 없다.
 
 ## 폴백 동작
@@ -52,7 +53,7 @@ KHOA와 NIFS는 CORS가 막혀 있어 브라우저에서 직접 못 부른다. �
 ## 설치
 
 ```bash
-export KHOA_KEY="발급받은_바다누리_인증키"
+export DATA_GO_KR_KEY="공공데이터포털_일반_인증키"
 
 python build_tides.py            # 최초 1회, 수 시간 소요
 python collect_sst.py            # 즉시
@@ -60,10 +61,18 @@ python collect_sst.py            # 즉시
 python -m http.server 8000       # http://localhost:8000  (루트가 ./www/ 로 리다이렉트)
 ```
 
-바다누리 인증키: <https://www.khoa.go.kr/oceangrid/khoa/koofs.do>
+인증키: <https://www.data.go.kr> 에서 아래 두 오픈API를 **활용신청** (개발단계 자동승인)
 
-`build_tides.py`는 관측소 × 날짜 단위로 호출한다. 40개소 × 365일 = 약 14,600건이라
-개발계정 일일 한도를 넘는다. 중단되면 `.cache/`에 체크포인트가 남으니 같은 명령으로
+- 조석예보(고, 저조) — <https://www.data.go.kr/data/15156018/openapi.do>
+- 조위관측소 최신 관측데이터 — <https://www.data.go.kr/data/15155508/openapi.do>
+
+포털 인증키는 계정당 하나라 두 API가 같은 값을 쓴다. 다만 **API 별로 활용신청은
+따로** 해야 하고, 신청하지 않은 API 는 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR` 로 막힌다.
+
+구 바다누리 OpenAPI(`khoa.go.kr/api/oceangrid`)는 2026-04-01 종료됐다. 이제 발급되지 않는다.
+
+`build_tides.py`는 지점 × 날짜 단위로 호출한다. 46개소 × 365일 = 약 16,800건이라
+개발계정 일일 한도(10,000)를 넘는다. 중단되면 `.cache/`에 체크포인트가 남으니 같은 명령으로
 재실행하면 이어서 받는다. 이틀에 나눠 돌리거나 운영계정으로 상향해서 쓴다.
 
 ## 자동 갱신
@@ -78,8 +87,8 @@ python -m http.server 8000       # http://localhost:8000  (루트가 ./www/ 로 
 | 조석 캐시 | 매 실행 | 완성될 때까지 1,200회씩 이어받기 |
 | 다음 해 조석 | 11월부터 | 연초에 물때가 비지 않도록 미리 |
 
-**조석은 첫 실행에서 안 끝난다.** 41개소 × 365일 ≈ 14,600회 호출이라 Actions
-잡 시간 제한과 KHOA 일일 쿼터에 둘 다 걸린다. `build_tides.py --budget 1200`
+**조석은 첫 실행에서 안 끝난다.** 46개소 × 365일 ≈ 16,800회 호출이라 Actions
+잡 시간 제한과 개발계정 일일 한도(10,000)에 둘 다 걸린다. `build_tides.py --budget 1200`
 으로 끊어 받고 체크포인트를 `.cache/` 에 커밋해 다음 실행이 이어받는다.
 하루 4회 × 1,200회 → 3~4일이면 한 해가 완성된다. 그동안은 근사 물때로 표시된다.
 

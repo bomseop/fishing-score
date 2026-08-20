@@ -5,19 +5,28 @@ GitHub 계정만 있으면 되고 비용은 들지 않습니다.
 
 ---
 
-## 0. 준비물 — 인증키 3개
+## 0. 준비물 — 인증키 2개
 
 먼저 발급받아 두세요. 승인에 시간이 걸리는 건 없습니다.
 
 | 키 | 발급처 | 용도 | 필수 |
 |---|---|---|---|
-| `KHOA_KEY` | [바다누리 해양정보](https://www.khoa.go.kr/oceangrid/khoa/koofs.do) | 조석 + 수온 | **필수** |
+| `DATA_GO_KR_KEY` | [공공데이터포털](https://www.data.go.kr) | 조석 + 수온 | **필수** |
 | `LAW_OC` | [국가법령정보 OPEN API](https://open.law.go.kr) | 금어기·금지체장 | 권장 |
-| `NIFS_KEY` | [공공데이터포털](https://www.data.go.kr) — "국립수산과학원 실시간 해양환경" 검색 | 연안 수온 정밀도 | 선택 |
+
+`DATA_GO_KR_KEY` 는 포털 마이페이지 > 오픈API > 개발계정 의 **일반 인증키**입니다.
+계정당 하나이지만 **API 마다 활용신청은 따로** 해야 합니다. 아래 둘 다 신청하세요
+(개발단계 자동승인이라 즉시 발급됩니다).
+
+- [조석예보(고, 저조) — 15156018](https://www.data.go.kr/data/15156018/openapi.do)
+- [조위관측소 최신 관측데이터 — 15155508](https://www.data.go.kr/data/15155508/openapi.do)
+
+> 구 바다누리(`khoa.go.kr/oceangrid`) OpenAPI 는 **2026-04-01 종료**됐습니다.
+> 거기서는 이제 키가 발급되지 않습니다.
 
 `LAW_OC`는 신청할 때 쓴 이메일의 **@ 앞부분**입니다. 예: `hongkildong@gmail.com` → `hongkildong`
 
-`KHOA_KEY`가 없으면 물때가 달 위상 근사로 떨어집니다. 서해에서 쓸 거면 사실상 필수입니다.
+`DATA_GO_KR_KEY`가 없으면 물때가 달 위상 근사로 떨어집니다. 서해에서 쓸 거면 사실상 필수입니다.
 
 ---
 
@@ -36,6 +45,7 @@ GitHub에서 **New repository** → 이름은 아무거나 (예: `fishing-score`
 fishing-score/
 ├── index.html                루트 리다이렉트 → ./www/
 ├── www/index.html            프론트엔드 본체
+├── khoa_api.py               포털 API 공용 계층
 ├── build_tides.py
 ├── collect_sst.py
 ├── sync_regulations.py
@@ -74,9 +84,8 @@ git push -u origin main
 
 이름을 정확히 이렇게 넣으세요. 오타가 나면 조용히 건너뜁니다.
 
-- `KHOA_KEY`
+- `DATA_GO_KR_KEY`
 - `LAW_OC`
-- `NIFS_KEY` (없으면 생략)
 
 ---
 
@@ -138,14 +147,14 @@ https://<사용자명>.github.io/fishing-score/
 - 법령 별표 수집 — 30초
 - 조석 캐시 — **1,200회만 받고 중단됩니다.** 정상입니다.
 
-조석은 40개소 × 365일 = 약 14,600회 호출이 필요해서 한 번에 못 받습니다.
+조석은 46개소 × 365일 = 약 16,800회 호출이 필요해서 한 번에 못 받습니다.
 매 실행마다 1,200회씩 이어받으므로 **하루 4회 × 3~4일이면 한 해가 완성됩니다.**
 그동안은 물때가 근사값으로 표시되고, 완성되면 자동으로 실측 기반으로 바뀝니다.
 
 기다리기 싫으면 로컬에서 한 번에 받아 커밋하면 됩니다.
 
 ```bash
-export KHOA_KEY="발급받은키"
+export DATA_GO_KR_KEY="공공데이터포털_일반_인증키"
 python build_tides.py            # 수 시간 소요
 git add data .cache && git commit -m "tide cache" && git push
 ```
@@ -258,14 +267,15 @@ Play Protect 경고는 정상입니다. Play 스토어에 등록된 인증서가
 4번(Workflow permissions)을 안 했거나 PAT 권한에 Contents: Write가 빠진 경우입니다.
 
 **수온이 계속 `근사`**
-`KHOA_KEY` 시크릿 이름 오타이거나 인증키가 아직 승인 대기 중입니다.
+`DATA_GO_KR_KEY` 시크릿 이름 오타이거나, **15155508 활용신청을 안 한** 경우입니다.
+로그에 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR` 가 찍히면 후자입니다.
 Actions 로그의 "수온 수집" 단계를 펼쳐보면 실패 사유가 찍힙니다.
 
 **법규가 계속 `씨드`**
 `LAW_OC`를 등록하지 않았거나 이메일 전체를 넣은 경우입니다. @ 앞부분만 넣으세요.
 
 **조석이 며칠째 미완성**
-Actions 요약에 진행률이 찍힙니다. KHOA 개발계정 일일 한도(보통 10,000회)에
+Actions 요약에 진행률이 찍힙니다. 개발계정 일일 한도(10,000회)에
 걸렸을 수 있습니다. 워크플로의 `--budget 1200`을 낮추면 더 천천히, 안전하게 받습니다.
 
 **예약 실행이 늦거나 건너뜀**

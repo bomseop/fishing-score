@@ -221,7 +221,7 @@ npm run build:debug
 ## 8. 남은 사람 손 — 이 4가지뿐
 
 1. **GitHub 저장소 생성 + 푸시** (`SETUP.md` 1절)
-2. **Secrets 등록** — `KHOA_KEY` `LAW_OC` `NIFS_KEY` `PAT` (`SETUP.md` 2·3절)
+2. **Secrets 등록** — `DATA_GO_KR_KEY` `LAW_OC` `PAT` (`SETUP.md` 0·2·3절)
 3. **키스토어 생성 + 시크릿 4개 등록**
 
    ```bash

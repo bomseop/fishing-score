@@ -2,22 +2,20 @@
 """
 collect_sst.py — 연안 실측 수온 수집
 
-data/sst-latest.json 을 갱신한다. 3시간 주기 cron 을 상정.
-프론트는 포인트에서 35km 이내에 관측점이 있으면 이 값을,
-없으면 Open-Meteo 격자 SST 를 쓴다.
+프론트엔드가 읽는 data/sst-latest.json 을 생성한다.
+격자 수온(Open-Meteo)은 동해 냉수대처럼 국지적인 현상을 8km 격자에서 뭉개므로
+조위관측소 실측값을 최근접 보간용으로 따로 모은다.
 
-  python collect_sst.py                 # KHOA 조위관측소 수온
-  python collect_sst.py --with-nifs     # + 국립수산과학원 어장정보
+  python collect_sst.py               # 조위관측소만
+  python collect_sst.py --with-nifs   # 국립수산과학원 실시간 어장정보까지
 
 환경변수:
-  KHOA_KEY    바다누리 인증키 (build_tides.py 와 동일)
-  NIFS_KEY    공공데이터포털 국립수산과학원 서비스키 (--with-nifs 일 때만)
+  DATA_GO_KR_KEY   공공데이터포털 일반 인증키
+                   https://www.data.go.kr/data/15155508/openapi.do 에서 활용신청
+  NIFS_ENDPOINT    (선택) 국립수산과학원 API 요청주소 재정의
 
-설계 메모:
-  KHOA 조위관측소는 40여 개소뿐이지만 결측이 적고 인증키가 조석과 공용이라
-  기본 소스로 쓴다. NIFS 어장정보는 관측점이 촘촘한 대신 결측·지연이 잦아
-  보조로 얹는다. 같은 위치에 둘 다 있으면 NIFS 를 우선한다 —
-  어장정보 관측점이 실제 연안에 더 가깝게 설치돼 있기 때문.
+호출량:
+  지점 46개소 × 1회 = 실행당 46회. 개발계정 10,000회/일 안에서 여유롭다.
 """
 
 from __future__ import annotations
@@ -29,16 +27,10 @@ import os
 import sys
 import time
 from pathlib import Path
-from urllib.parse import urlencode
-from urllib.request import urlopen
-from urllib.error import HTTPError, URLError
 
-KHOA_BASE = "http://www.khoa.go.kr/api/oceangrid"
-EP_STATIONS = f"{KHOA_BASE}/ObsServiceObj/search.do"
-EP_RECENT = f"{KHOA_BASE}/tideObsRecent/search.do"      # 실시간 조위관측(수온 포함)
+from khoa_api import EP_DT_RECENT, STATIONS, get, items, log, service_key
 
 # 국립수산과학원 실시간 어장정보. 포털 상세 페이지의 요청주소로 교체해서 쓴다.
-# https://www.data.go.kr 에서 "국립수산과학원 실시간 해양환경" 검색
 NIFS_ENDPOINT = os.environ.get(
     "NIFS_ENDPOINT",
     "http://apis.data.go.kr/1192000/RealtimeObsService/getRealtimeObsList",
@@ -46,85 +38,95 @@ NIFS_ENDPOINT = os.environ.get(
 
 OUT = Path("data/sst-latest.json")
 STALE_HOURS = 6          # 이보다 오래된 관측은 버린다
-MAX_RETRY = 3
 RATE_SLEEP = 0.15
 
+# 관측시각은 KST 로 온다. Actions 러너는 UTC 라 그냥 비교하면 9시간 틀어져
+# 멀쩡한 관측이 전부 '오래됨'으로 버려진다.
+KST = dt.timezone(dt.timedelta(hours=9))
 
-def log(m: str) -> None:
-    print(f"[{dt.datetime.now():%H:%M:%S}] {m}", flush=True)
+
+def now_kst() -> dt.datetime:
+    return dt.datetime.now(tz=KST)
 
 
-def api_get(url: str, params: dict) -> dict | None:
-    q = urlencode(params)
-    for a in range(1, MAX_RETRY + 1):
+def parse_kst(ts: str | None) -> dt.datetime | None:
+    if not ts:
+        return None
+    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d%H%M"):
         try:
-            with urlopen(f"{url}?{q}", timeout=15) as r:
-                return json.loads(r.read().decode("utf-8"))
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as e:
-            if a == MAX_RETRY:
-                log(f"  실패: {e}")
-                return None
-            time.sleep(2 ** a)
+            return dt.datetime.strptime(str(ts).strip()[:19], fmt).replace(tzinfo=KST)
+        except ValueError:
+            continue
     return None
 
 
 def fresh(ts: str | None) -> bool:
-    if not ts:
-        return False
-    for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y%m%d%H%M"):
-        try:
-            t = dt.datetime.strptime(ts.strip()[:19], fmt)
-            return (dt.datetime.now() - t).total_seconds() < STALE_HOURS * 3600
-        except ValueError:
-            continue
-    return False
+    t = parse_kst(ts)
+    return bool(t and (now_kst() - t).total_seconds() < STALE_HOURS * 3600)
 
 
-def collect_khoa(key: str) -> list[dict]:
-    log("KHOA 조위관측소 목록")
-    js = api_get(EP_STATIONS, {"ServiceKey": key, "ServiceType": "json"})
-    if not js:
-        return []
-    codes = []
-    for r in js.get("result", {}).get("data", []):
-        c = r.get("obs_post_id") or r.get("obs_code")
-        n = r.get("obs_post_name") or r.get("obs_object")
-        lat, lon = r.get("obs_lat"), r.get("obs_lon")
-        if c and lat and lon and str(c).startswith("DT_"):
-            codes.append((c, n, float(lat), float(lon)))
-
-    log(f"  {len(codes)}개소 관측값 수집")
-    out = []
-    for c, n, lat, lon in codes:
-        js = api_get(EP_RECENT, {"ServiceKey": key, "ObsCode": c, "ResultType": "json"})
-        time.sleep(RATE_SLEEP)
-        if not js:
-            continue
-        d = js.get("result", {}).get("data", {})
-        if isinstance(d, list):
-            d = d[0] if d else {}
-        temp = d.get("water_temp")
-        obs_t = d.get("record_time") or d.get("obs_time")
-        if temp in (None, "", "-") or not fresh(obs_t):
+def latest_wtem(rows: list[dict]) -> tuple[float, str] | None:
+    """관측 행들 중 수온이 유효한 가장 최근 값."""
+    best = None
+    for r in rows:
+        v = r.get("wtem")
+        if v in (None, "", "-"):
             continue
         try:
-            t = float(temp)
-        except ValueError:
+            t = float(v)
+        except (TypeError, ValueError):
             continue
         if not (-3 <= t <= 35):        # 센서 이상값 제거
             continue
-        out.append({"name": n, "lat": round(lat, 5), "lon": round(lon, 5),
-                    "temp": round(t, 1), "agency": "KHOA", "obs": obs_t})
+        when = parse_kst(r.get("obsrvnDt"))
+        if not when:
+            continue
+        if best is None or when > best[2]:
+            best = (t, r.get("obsrvnDt"), when)
+    return (best[0], best[1]) if best else None
+
+
+def collect_khoa(key: str) -> list[dict]:
+    log(f"조위관측소 실측 수온 — {len(STATIONS)}개소")
+    today = f"{now_kst():%Y%m%d}"
+    yday = f"{now_kst() - dt.timedelta(days=1):%Y%m%d}"
+    out: list[dict] = []
+    denied = False
+
+    for code, (name, lat, lon) in STATIONS.items():
+        rows = items(get(EP_DT_RECENT, key, {
+            "obsCode": code, "type": "json", "numOfRows": "300", "min": "60",
+            "reqDate": today,
+        }))
+        # 자정 직후에는 오늘 자료가 거의 없다. 전날로 한 번 더 본다.
+        if not rows:
+            rows = items(get(EP_DT_RECENT, key, {
+                "obsCode": code, "type": "json", "numOfRows": "300", "min": "60",
+                "reqDate": yday,
+            }))
+            time.sleep(RATE_SLEEP)
+        time.sleep(RATE_SLEEP)
+
+        if not rows:
+            denied = True          # 전 지점 실패면 대개 활용신청 누락이다
+            continue
+        denied = False
+        pick = latest_wtem(rows)
+        if not pick or not fresh(pick[1]):
+            continue
+        out.append({"name": name, "lat": round(lat, 5), "lon": round(lon, 5),
+                    "temp": round(pick[0], 1), "agency": "KHOA", "obs": pick[1]})
+
+    if denied and not out:
+        log("  전 지점 응답 없음 — data.go.kr 에서 '조위관측소 최신 관측데이터'(15155508)")
+        log("  활용신청이 되어 있는지 확인하세요.")
     log(f"  유효 {len(out)}건")
     return out
 
 
 def collect_nifs(key: str) -> list[dict]:
     log("NIFS 실시간 어장정보")
-    js = api_get(NIFS_ENDPOINT, {
-        "serviceKey": key, "numOfRows": 500, "pageNo": 1,
-        "resultType": "json", "dataType": "JSON",
-    })
+    js = get(NIFS_ENDPOINT, key, {"numOfRows": "500", "pageNo": "1", "resultType": "json"})
     if not js:
         log("  응답 없음 — NIFS_ENDPOINT 를 포털의 실제 요청주소로 교체하세요.")
         return []
@@ -170,7 +172,7 @@ def collect_nifs(key: str) -> list[dict]:
 
 
 def merge(khoa: list[dict], nifs: list[dict]) -> list[dict]:
-    """5km 이내 중복은 NIFS 우선."""
+    """5km 이내 중복은 NIFS 우선 — 어장정보가 연안에 더 가깝다."""
     out = list(nifs)
     for k in khoa:
         dup = any(abs(n["lat"] - k["lat"]) * 111 < 5 and abs(n["lon"] - k["lon"]) * 89 < 5
@@ -185,18 +187,11 @@ def main() -> None:
     ap.add_argument("--with-nifs", action="store_true")
     args = ap.parse_args()
 
-    khoa_key = os.environ.get("KHOA_KEY", "").strip()
-    if not khoa_key:
-        sys.exit("KHOA_KEY 환경변수가 없습니다.")
-
-    stations = collect_khoa(khoa_key)
+    key = service_key()
+    stations = collect_khoa(key)
 
     if args.with_nifs:
-        nifs_key = os.environ.get("NIFS_KEY", "").strip()
-        if nifs_key:
-            stations = merge(stations, collect_nifs(nifs_key))
-        else:
-            log("NIFS_KEY 없음 — KHOA 만 사용")
+        stations = merge(stations, collect_nifs(key))
 
     if not stations:
         # 빈 파일로 덮어쓰면 프론트가 Open-Meteo 로 폴백하지 못하고
@@ -206,7 +201,7 @@ def main() -> None:
 
     OUT.parent.mkdir(exist_ok=True)
     OUT.write_text(json.dumps({
-        "generated": dt.datetime.now().astimezone().isoformat(timespec="seconds"),
+        "generated": now_kst().isoformat(timespec="seconds"),
         "staleHours": STALE_HOURS,
         "count": len(stations),
         "stations": stations,

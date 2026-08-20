@@ -38,10 +38,11 @@ jobs:
       - name: 수온 수집
         continue-on-error: true
         env:
-          KHOA_KEY: ${{ secrets.KHOA_KEY }}
-          NIFS_KEY: ${{ secrets.NIFS_KEY }}
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+          # NIFS 요청주소는 확정값이 아니라 저장소 변수로 넣었을 때만 시도한다
+          NIFS_ENDPOINT: ${{ vars.NIFS_ENDPOINT }}
         run: |
-          if [ -n "$NIFS_KEY" ]; then
+          if [ -n "$NIFS_ENDPOINT" ]; then
             python collect_sst.py --with-nifs
           else
             python collect_sst.py
@@ -68,12 +69,12 @@ jobs:
         run: python sync_regulations.py
 
       # ── 3. 조석 (파일이 없을 때만, 예산 범위 안에서 조금씩) ──
-      # 40개소 × 365일 = 약 14,600 호출이라 한 번에 못 받는다.
-      # 하루 4회 × 1,200회 = 4,800회씩 → 3~4일이면 한 해가 완성된다.
+      # 46개소 × 365일 = 약 16,800 호출이라 한 번에 못 받는다.
+      # 개발계정 한도가 10,000회/일이므로 하루 4회 × 1,200회 = 4,800회씩 나눠 받는다.
       - name: 조석 캐시 채우기
         continue-on-error: true
         env:
-          KHOA_KEY: ${{ secrets.KHOA_KEY }}
+          DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
         run: |
           set +e
           YEAR=$(date -u -d '+9 hours' +%Y)

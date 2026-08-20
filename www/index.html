@@ -1143,31 +1143,45 @@ const GEO = { state:'idle', label:'' };
 const kmBetween = (a,b) =>
   Math.hypot((a.lat-b.lat)*111, (a.lon-b.lon)*111*Math.cos(a.lat*Math.PI/180));
 
-async function currentPos(){
-  if(NATIVE && CAP.Geolocation){
-    let perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
-    const need = !perm || perm.location === 'prompt' || perm.location === 'prompt-with-rationale'
-                       || perm.location === 'denied';
-    if(need){
-      // 대략 위치만으로 충분하므로 그쪽을 먼저 청한다. 별칭을 모르는 버전이면
-      // 예외가 나므로 표준 'location' 으로 물러선다.
-      perm = await CAP.Geolocation.requestPermissions({permissions:['coarseLocation']})
-                  .catch(()=> CAP.Geolocation.requestPermissions({permissions:['location']})
-                                  .catch(()=>null));
-    }
-    if(perm && perm.location === 'denied' && perm.coarseLocation === 'denied'){
-      const e = new Error('denied'); e.denied = true; throw e;
-    }
-    const p = await CAP.Geolocation.getCurrentPosition(
-      {enableHighAccuracy:false, timeout:9000, maximumAge:300000});
-    return {lat:p.coords.latitude, lon:p.coords.longitude};
-  }
-  return await new Promise((res, rej)=>{
+const GEO_OPT = {enableHighAccuracy:false, timeout:9000, maximumAge:300000};
+
+/* WebView 표준 경로. OS 권한만 있으면 동작하고, 정밀/대략 어느 쪽이든 받는다. */
+function webPos(){
+  return new Promise((res, rej) => {
     if(!navigator.geolocation) return rej(new Error('no geolocation'));
     navigator.geolocation.getCurrentPosition(
-      p => res({lat:p.coords.latitude, lon:p.coords.longitude}), rej,
-      {enableHighAccuracy:false, timeout:9000, maximumAge:300000});
+      p => res({lat:p.coords.latitude, lon:p.coords.longitude}), rej, GEO_OPT);
   });
+}
+
+async function currentPos(){
+  if(!(NATIVE && CAP.Geolocation)) return await webPos();
+
+  /* 1) 권한 청하기 — 대략 위치면 충분하므로 그쪽을 먼저 청한다.
+        별칭을 모르는 버전이면 예외가 나므로 표준 'location' 으로 물러선다. */
+  let perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
+  const granted = p => p && (p.location === 'granted' || p.coarseLocation === 'granted');
+  if(!granted(perm)){
+    perm = await CAP.Geolocation.requestPermissions({permissions:['coarseLocation']})
+                .catch(()=> CAP.Geolocation.requestPermissions({permissions:['location']})
+                                .catch(()=>null));
+  }
+
+  /* 2) 플러그인으로 시도. 실패하면 WebView 경로로 한 번 더.
+        '대략적인 위치'만 허용하면 플러그인이 정밀 권한이 없다며 거부할 수 있는데,
+        우리에게는 대략 위치로 충분하다. 여기서 포기하면 기능이 헛되이 죽는다. */
+  try{
+    const p = await CAP.Geolocation.getCurrentPosition(GEO_OPT);
+    return {lat:p.coords.latitude, lon:p.coords.longitude};
+  }catch(e1){
+    try{
+      return await webPos();
+    }catch(e2){
+      const e = new Error('denied');
+      e.denied = !granted(perm);
+      throw e;
+    }
+  }
 }
 
 async function locateNearest(auto){
@@ -1194,10 +1208,16 @@ async function locateNearest(auto){
 
 /* 사이드로딩이라 자동 업데이트가 없다. 새 버전이 있다는 사실만 알리고
    설치는 사용자가 한다. 자동 업데이터는 개인용 앱에 과잉이다. */
-const VER = { current:'__APP_VERSION__', latest:null, url:null };
+const VER = { current:'__APP_VERSION__', build:null, latest:null, url:null };
 async function checkUpdate(){
   if(NATIVE && CAP.App){
-    try{ VER.current = (await CAP.App.getInfo()).version || VER.current; }catch(e){}
+    try{
+      const info = await CAP.App.getInfo();
+      VER.current = info.version || VER.current;
+      // versionCode. 버전명이 같아도 빌드가 다르면 이게 달라진다 —
+      // "새로 깐 게 맞나"를 확인할 유일한 단서라서 화면에 띄운다.
+      VER.build = info.build || null;
+    }catch(e){}
   }
   if(VER.current.indexOf('__') === 0) VER.current = '—';
   drawToolbar();
@@ -1224,7 +1244,7 @@ function drawToolbar(){
                : '내 위치';
   const ver = VER.latest
     ? `<a class="tver up" href="${VER.url}" target="_blank" rel="noopener">v${VER.current} → v${VER.latest}</a>`
-    : `<span class="tver">v${VER.current}</span>`;
+    : `<span class="tver">v${VER.current}${VER.build ? ` (${VER.build})` : ''}</span>`;
   el.innerHTML =
       `<button class="tbtn" id="btn-geo"${GEO.state === 'busy' ? ' disabled' : ''}>◎ ${geoTxt}</button>`
     + `<button class="tbtn" id="btn-keep" aria-pressed="${KEEP.on}">화면유지 ${KEEP.on ? 'ON' : 'OFF'}</button>`

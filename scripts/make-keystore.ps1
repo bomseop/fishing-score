@@ -11,12 +11,17 @@
   powershell -ExecutionPolicy Bypass -File scripts\make-keystore.ps1
 #>
 param(
-  [string]$Out   = "shorefishing.keystore",
+  [string]$Out   = "",
   [string]$Alias = "shorefishing",
   [int]$Days     = 10000
 )
 
 $ErrorActionPreference = "Stop"
+
+# 어느 폴더에서 실행하든 저장소 루트에 만든다.
+# 실행 위치에 따라 파일이 흩어지면 나중에 어느 게 진짜 키인지 알 수 없어진다.
+$RepoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $Out) { $Out = Join-Path $RepoRoot "shorefishing.keystore" }
 
 # ── keytool 찾기 ──────────────────────────────────────────────
 $keytool = $null
@@ -70,17 +75,25 @@ $b64 = [Convert]::ToBase64String([IO.File]::ReadAllBytes((Resolve-Path $Out)))
 $b64Path = "$Out.b64"
 Set-Content -Path $b64Path -Value $b64 -NoNewline -Encoding ascii
 
+# 3KB 짜리 한 줄이라 손으로 긁어 복사하기 나쁘다. 클립보드에 바로 넣어준다.
+$clip = $false
+try { Set-Clipboard -Value $b64; $clip = $true } catch {}
+
 Write-Host ""
 Write-Host "생성 완료 : $Out"
 Write-Host ""
 Write-Host "─────────────────────────────────────────────────────────"
-Write-Host " GitHub → Settings → Secrets and variables → Actions"
+Write-Host " GitHub > Settings > Secrets and variables > Actions"
 Write-Host " 아래 4개를 Repository secret 으로 등록하세요."
 Write-Host "─────────────────────────────────────────────────────────"
-Write-Host "  KEYSTORE_B64       → $b64Path 의 내용 전체"
-Write-Host "  KEYSTORE_PASSWORD  → 방금 정한 비밀번호"
-Write-Host "  KEY_ALIAS          → $Alias"
-Write-Host "  KEY_PASSWORD       → 방금 정한 비밀번호 (같은 값)"
+if ($clip) {
+  Write-Host "  KEYSTORE_B64       -> 클립보드에 복사됨. 그냥 Ctrl+V 하세요."
+} else {
+  Write-Host "  KEYSTORE_B64       -> $b64Path 의 내용 전체"
+}
+Write-Host "  KEYSTORE_PASSWORD  -> 방금 정한 비밀번호"
+Write-Host "  KEY_ALIAS          -> $Alias"
+Write-Host "  KEY_PASSWORD       -> 방금 정한 비밀번호 (같은 값)"
 Write-Host ""
 Write-Host "등록이 끝나면 $b64Path 는 지우세요. $Out 은 안전한 곳에 백업하세요."
 Write-Host "둘 다 .gitignore 에 들어 있어 커밋되지 않습니다."

@@ -93,16 +93,54 @@ jobs:
         id: sign
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          # 셸 스크립트 본문에 시크릿을 직접 끼워 넣지 않는다.
+          # 비밀번호에 따옴표가 있으면 스크립트가 깨지고, 그 형태로 로그에 샐 수 있다.
+          KS_PASS: ${{ secrets.KEYSTORE_PASSWORD }}
+          KS_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KS_KEYPASS: ${{ secrets.KEY_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then
-            echo "$KEYSTORE_B64" | base64 -d > android/app/release.keystore
-            echo "mode=release" >> $GITHUB_OUTPUT
-          else
+          set -u
+          KS=android/app/release.keystore
+
+          if [ -z "${KEYSTORE_B64:-}" ]; then
             # 키스토어가 아직 없어도 첫 스모크 테스트는 되게 한다.
             # 다만 디버그 서명은 빌드마다 달라져 기존 설치본을 덮어쓰지 못한다.
             echo "::warning::KEYSTORE_B64 시크릿이 없어 디버그 APK 로 빌드합니다. 업데이트 설치가 불가능합니다."
             echo "mode=debug" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          # 붙여넣는 과정에서 공백·개행·CR 이 섞이는 일이 잦다.
+          # GNU base64 는 공백 한 칸에도 'invalid input' 으로 죽으므로 미리 턴다.
+          CLEAN=$(printf '%s' "$KEYSTORE_B64" | tr -d '[:space:]')
+          echo "b64 길이: ${#CLEAN} (원본 ${#KEYSTORE_B64})"
+
+          if ! printf '%s' "$CLEAN" | base64 -d > "$KS" 2>/tmp/b64err; then
+            echo "::error::KEYSTORE_B64 디코딩 실패: $(cat /tmp/b64err)"
+            echo "  시크릿 값이 잘렸거나 base64 가 아닌 문자가 섞였습니다."
+            echo "  scripts/make-keystore.ps1 이 만든 .b64 파일 내용 '전체'를 다시 붙여넣으세요."
+            exit 1
+          fi
+
+          # 잘린 값이 통과해서 Gradle 이 알아듣기 힘든 오류를 내는 걸 막는다.
+          SZ=$(wc -c < "$KS")
+          MAGIC=$(head -c 2 "$KS" | od -An -tx1 | tr -d ' \n')
+          echo "복원된 키스토어: ${SZ} bytes, 헤더 ${MAGIC}"
+          if [ "$SZ" -lt 500 ] || [ "$MAGIC" != "3082" ]; then
+            echo "::error::복원된 파일이 키스토어가 아닙니다 (${SZ} bytes, 헤더 ${MAGIC}, 3082 여야 함)."
+            exit 1
+          fi
+
+          MISSING=""
+          [ -n "${KS_PASS:-}" ]    || MISSING="$MISSING KEYSTORE_PASSWORD"
+          [ -n "${KS_ALIAS:-}" ]   || MISSING="$MISSING KEY_ALIAS"
+          [ -n "${KS_KEYPASS:-}" ] || MISSING="$MISSING KEY_PASSWORD"
+          if [ -n "$MISSING" ]; then
+            echo "::error::비어 있는 시크릿:$MISSING"
+            exit 1
+          fi
+
+          echo "mode=release" >> $GITHUB_OUTPUT
 
       - name: 빌드
         working-directory: android

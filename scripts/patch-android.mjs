@@ -120,11 +120,22 @@ edit('app/src/main/AndroidManifest.xml', '세로 고정 · COARSE 위치만 · c
   // '대략적인 위치'를 직접 고를 수 있고, 앱은 enableHighAccuracy:false 로
   // 요청하므로 대략 위치만 허용해도 최근접 포인트 선택에 지장이 없다.
   // 정밀도를 우리가 막는 것보다 사용자가 고르게 두는 편이 낫다.
-  if (!s.includes('ACCESS_COARSE_LOCATION')) {
+  //
+  // COARSE 만 선언해도 안 됐다. 병합 매니페스트 확인 결과 Geolocation 플러그인은
+  // 권한을 하나도 선언하지 않는다 — 앱이 직접 선언하라는 설계다.
+  // 그리고 COARSE 만 있으면 GPS 프로바이더를 쓸 수 없는데,
+  // enableHighAccuracy:false 가 쓰는 NETWORK 프로바이더는 요즘 기기에 아예
+  // 없는 경우가 있다. 그러면 권한을 허용해도 좌표가 영영 안 잡힌다.
+  //
+  // 그래서 둘 다 선언한다. Android 12+ 는 시스템 대화상자에서 사용자가
+  // '대략적인 위치'를 고를 수 있으므로 선택권은 사용자에게 남는다.
+  if (!s.includes('ACCESS_FINE_LOCATION')) {
     need(s, '</manifest>', '매니페스트 닫는 태그');
     s = s.replace('</manifest>',
-      `    <!-- 최근접 포인트 자동 선택용. 거부해도 앱은 정상 동작한다. -->
+      `    <!-- 최근접 포인트 자동 선택용. 거부해도 앱은 정상 동작한다.
+         Geolocation 플러그인은 권한을 선언하지 않으므로 여기서 해야 한다. -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 
 </manifest>`);
   }

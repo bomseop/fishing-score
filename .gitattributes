@@ -1,0 +1,3 @@
+
+# .ps1 은 BOM 이 없으면 Windows PowerShell 5.1 이 cp949 로 읽어 한글이 깨진다
+*.ps1 text working-tree-encoding=UTF-8 eol=CRLF

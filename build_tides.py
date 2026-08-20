@@ -20,7 +20,8 @@ build_tides.py — 조석예보 연간 선계산
   지점 × 날짜 단위 호출이라 46개소 × 365일 = 약 16,800건.
   개발계정 일일 한도가 10,000 이라 한 번에 못 받는다. --budget 으로 쪼개 받고
   체크포인트를 .cache/ 에 남겨 다음 실행이 이어받는다.
-  Actions 에서 하루 4회 × 1,200회면 3~4일에 한 해가 완성된다.
+  Actions 에서 하루 4회 × 2,400회면 이틀이면 한 해가 완성된다.
+  속도가 아니라 일일 한도가 병목이다 — 2,400회는 1분 남짓이면 끝난다.
 """
 
 from __future__ import annotations
@@ -30,13 +31,20 @@ import datetime as dt
 import json
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from khoa_api import EP_TIDE_FCST, STATIONS, get, items, log, scan_stations, service_key
 
 OUT_DIR = Path("data")
 CKPT_DIR = Path(".cache")
-RATE_SLEEP = 0.12          # 초 / 호출
+# 이 API 에는 일일 한도(10,000)와 별개로 **초당 요청 제한**이 있다.
+# 넘기면 429 가 돌아오고, 재시도가 일일 한도를 대신 태운다 — 가장 나쁜 낭비다.
+# 실측: 1워커 13.7/s, 2워커 27.4/s, 3워커 41.9/s 까지 429 없음.
+# 8워커(+대기 0.05)는 429 폭탄에 처리량은 4/s 로 오히려 떨어졌다.
+# 3워커에 약간의 여유를 둬 33/s 근처를 목표로 한다.
+RATE_SLEEP = 0.02          # 초 / 호출 (워커마다 적용)
+WORKERS = 3                # 동시 요청 수
 
 # 비우면 khoa_api.STATIONS 전체를 사용한다.
 STATION_WHITELIST: list[str] = []
@@ -63,7 +71,7 @@ def parse_events(rows: list[dict]) -> list[list]:
     return out
 
 
-def build(year: int, key: str, force: bool, budget: int = 0) -> int:
+def build(year: int, key: str, force: bool, budget: int = 0, workers: int = WORKERS) -> int:
     """반환값: 0 완료 / 2 예산 소진(이어서 받아야 함)"""
     OUT_DIR.mkdir(exist_ok=True)
     CKPT_DIR.mkdir(exist_ok=True)
@@ -101,39 +109,61 @@ def build(year: int, key: str, force: bool, budget: int = 0) -> int:
             json.dumps({"events": events, "done": sorted(done)}, ensure_ascii=False),
             encoding="utf-8")
 
+    # 남은 작업을 먼저 펼친 뒤 예산만큼 잘라 병렬로 던진다.
+    todo = []
+    for code in codes:
+        events.setdefault(code, [])
+        day = start
+        while day <= end:
+            tag = f"{code}:{day:%Y%m%d}"
+            if tag not in done:
+                todo.append((code, f"{day:%Y%m%d}", tag))
+            day += dt.timedelta(days=1)
+
+    if budget and len(todo) > budget:
+        todo, exhausted = todo[:budget], True
+    if not todo:
+        log("받을 것이 없습니다.")
+
+    def fetch(item):
+        """워커 스레드. 실패는 예외로 올리지 않고 표시만 한다 —
+        한 건 때문에 전체가 멈추면 재개 비용이 크다."""
+        code, ymd, tag = item
+        try:
+            rows = items(get(EP_TIDE_FCST, key, {
+                "obsCode": code, "reqDate": ymd, "type": "json", "numOfRows": "100",
+            }))
+            time.sleep(RATE_SLEEP)
+            return code, tag, parse_events(rows), True
+        except Exception:
+            return code, tag, [], False
+
+    failed = 0
+    t0 = time.time()
     try:
-        for code in codes:
-            if exhausted:
-                break
-            events.setdefault(code, [])
-            day = start
-            while day <= end:
-                tag = f"{code}:{day:%Y%m%d}"
-                if tag in done:
-                    day += dt.timedelta(days=1)
-                    continue
-                if budget and spent >= budget:
-                    exhausted = True
-                    break
-                rows = items(get(EP_TIDE_FCST, key, {
-                    "obsCode": code,
-                    "reqDate": f"{day:%Y%m%d}",
-                    "type": "json",
-                    "numOfRows": "100",
-                }))
-                events[code].extend(parse_events(rows))
+        with ThreadPoolExecutor(max_workers=workers) as ex:
+            # 결과 소비는 메인 스레드에서만 하므로 events/done 에 락이 필요 없다.
+            for code, tag, evs, ok in ex.map(fetch, todo):
+                if not ok:
+                    failed += 1
+                    continue          # done 에 넣지 않는다. 다음 실행이 다시 받는다.
+                events[code].extend(evs)
                 done.add(tag)
                 spent += 1
-                if spent % 200 == 0:
-                    log(f"  {len(done)}/{total}  ({len(done)/total:.1%})  이번 실행 {spent}회")
+                if spent % 500 == 0:
+                    rate = spent / max(time.time() - t0, 1e-6)
+                    left = (len(todo) - spent) / max(rate, 1e-6)
+                    log(f"  {len(done)}/{total} ({len(done)/total:.1%})  "
+                        f"{rate:.0f}건/초  남은 {left/60:.1f}분")
                     save_ckpt()
-                time.sleep(RATE_SLEEP)
-                day += dt.timedelta(days=1)
-    except Exception as e:
+    except KeyboardInterrupt:
         save_ckpt()
-        log(f"중단: {e}")
-        log("체크포인트 저장 완료. 같은 명령으로 재실행하면 이어서 받습니다.")
+        log("중단됨. 체크포인트 저장 완료 — 같은 명령으로 재실행하면 이어받습니다.")
         sys.exit(1)
+
+    if failed:
+        log(f"실패 {failed}건 (다음 실행에서 재시도)")
+        exhausted = True
 
     if exhausted:
         save_ckpt()
@@ -199,6 +229,8 @@ def main() -> None:
     ap.add_argument("--budget", type=int, default=0,
                     help="이번 실행의 최대 API 호출 수 (0=무제한)")
     ap.add_argument("--stations", type=str, default="")
+    ap.add_argument("--workers", type=int, default=WORKERS,
+                    help=f"동시 요청 수 (기본 {WORKERS})")
     ap.add_argument("--scan", action="store_true",
                     help="지점표를 다시 스캔해 출력한다 (khoa_api.STATIONS 갱신용)")
     args = ap.parse_args()
@@ -215,7 +247,7 @@ def main() -> None:
     if args.stations:
         STATION_WHITELIST.extend(s.strip() for s in args.stations.split(",") if s.strip())
 
-    sys.exit(build(args.year, key, args.force, args.budget))
+    sys.exit(build(args.year, key, args.force, args.budget, args.workers))
 
 
 if __name__ == "__main__":

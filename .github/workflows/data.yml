@@ -70,7 +70,8 @@ jobs:
 
       # ── 3. 조석 (파일이 없을 때만, 예산 범위 안에서 조금씩) ──
       # 46개소 × 365일 = 약 16,800 호출이라 한 번에 못 받는다.
-      # 개발계정 한도가 10,000회/일이므로 하루 4회 × 1,200회 = 4,800회씩 나눠 받는다.
+      # 개발계정 한도가 10,000회/일이므로 하루 4회 × 2,400회 = 9,600회씩 나눠 받는다.
+      # 속도가 아니라 이 한도가 병목이다 — 2,400회는 1분 남짓이면 끝난다.
       - name: 조석 캐시 채우기
         continue-on-error: true
         env:
@@ -81,12 +82,12 @@ jobs:
           NEXT=$((YEAR + 1))
           MONTH=$(date -u -d '+9 hours' +%m)
 
-          python build_tides.py --year "$YEAR" --budget 1200
+          python build_tides.py --year "$YEAR" --budget 2400
           echo "올해 조석 exit=$?"
 
           # 11월부터는 내년치를 미리 받아둔다. 연초에 물때가 비는 일이 없도록.
           if [ "$MONTH" -ge 11 ]; then
-            python build_tides.py --year "$NEXT" --budget 1200
+            python build_tides.py --year "$NEXT" --budget 2400
           fi
           exit 0
 

@@ -28,7 +28,7 @@ import sys
 import time
 from pathlib import Path
 
-from khoa_api import EP_DT_RECENT, STATIONS, get, items, log, service_key
+from khoa_api import EP_DT_RECENT, STATIONS, get, items, log, service_key, write_atomic
 
 # 국립수산과학원 실시간 어장정보. 포털 상세 페이지의 요청주소로 교체해서 쓴다.
 NIFS_ENDPOINT = os.environ.get(
@@ -229,12 +229,12 @@ def main() -> None:
         sys.exit(1)
 
     OUT.parent.mkdir(exist_ok=True)
-    OUT.write_text(json.dumps({
+    write_atomic(OUT, json.dumps({
         "generated": now_kst().isoformat(timespec="seconds"),
         "staleHours": STALE_HOURS,
         "count": len(stations),
         "stations": stations,
-    }, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
+    }, ensure_ascii=False, separators=(",", ":")))
     log(f"완료 → {OUT} ({len(stations)} stations)")
 
 

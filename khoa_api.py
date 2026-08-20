@@ -94,6 +94,19 @@ def log(msg: str) -> None:
     print(f"[{dt.datetime.now():%H:%M:%S}] {msg}", flush=True)
 
 
+def write_atomic(path, text: str) -> None:
+    """임시 파일에 쓰고 원자적으로 바꿔치기한다.
+
+    체크포인트는 2MB 짜리를 수백 건마다 덮어쓴다. 그냥 write_text 로 쓰면
+    저장 도중 전원이 나갔을 때 파일이 잘린 채 남고, 다음 실행이 그걸 읽다
+    죽으면서 그때까지 받은 것을 통째로 잃는다. os.replace 는 같은 볼륨에서
+    원자적이므로 중간 상태가 관측되지 않는다.
+    """
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(text, encoding="utf-8")
+    os.replace(tmp, path)
+
+
 def service_key() -> str:
     """공공데이터포털 인증키. 인코딩·디코딩 어느 쪽을 넣어도 동작한다.
 

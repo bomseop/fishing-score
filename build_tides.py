@@ -34,7 +34,8 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
-from khoa_api import EP_TIDE_FCST, STATIONS, get, items, log, scan_stations, service_key
+from khoa_api import (EP_TIDE_FCST, STATIONS, get, items, log, scan_stations,
+                      service_key, write_atomic)
 
 OUT_DIR = Path("data")
 CKPT_DIR = Path(".cache")
@@ -93,10 +94,16 @@ def build(year: int, key: str, force: bool, budget: int = 0, workers: int = WORK
     events: dict[str, list] = {}
     done: set[str] = set()
     if ckpt_path.exists():
-        ck = json.loads(ckpt_path.read_text(encoding="utf-8"))
-        events = ck.get("events", {})
-        done = set(ck.get("done", []))
-        log(f"체크포인트 복구: {len(done)}건 완료 상태에서 재개")
+        try:
+            ck = json.loads(ckpt_path.read_text(encoding="utf-8"))
+            events = ck.get("events", {})
+            done = set(ck.get("done", []))
+            log(f"체크포인트 복구: {len(done)}건 완료 상태에서 재개")
+        except (json.JSONDecodeError, OSError) as e:
+            # 예전 방식으로 저장된 파일이 잘려 있을 수 있다. 여기서 죽으면
+            # 재개 자체가 불가능해지므로, 잃은 만큼만 다시 받는다.
+            log(f"체크포인트가 손상됐습니다({e}). 처음부터 다시 받습니다.")
+            events, done = {}, set()
 
     start = dt.date(year, 1, 1)
     end = dt.date(year, 12, 31)
@@ -105,9 +112,8 @@ def build(year: int, key: str, force: bool, budget: int = 0, workers: int = WORK
     exhausted = False
 
     def save_ckpt() -> None:
-        ckpt_path.write_text(
-            json.dumps({"events": events, "done": sorted(done)}, ensure_ascii=False),
-            encoding="utf-8")
+        write_atomic(ckpt_path,
+                     json.dumps({"events": events, "done": sorted(done)}, ensure_ascii=False))
 
     # 남은 작업을 먼저 펼친 뒤 예산만큼 잘라 병렬로 던진다.
     todo = []
@@ -214,8 +220,8 @@ def build(year: int, key: str, force: bool, budget: int = 0, workers: int = WORK
         "maxRate": max_rate,
         "maxRange": max_range,
     }
-    out_path.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-                        encoding="utf-8")
+    # 앱이 읽는 파일이다. 잘린 JSON 이 남으면 물때가 통째로 죽는다.
+    write_atomic(out_path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")))
     ckpt_path.unlink(missing_ok=True)
     size = out_path.stat().st_size / 1e6
     log(f"완료 → {out_path} ({size:.1f} MB, {sum(len(v) for v in events.values())} events)")

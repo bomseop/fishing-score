@@ -1197,10 +1197,16 @@ async function locateNearest(auto){
     const me = await currentPos();
     let best = null, bd = 1e9;
     for(const p of POINTS){ const d = kmBetween(me, p); if(d < bd){ bd = d; best = p; } }
-    if(!best || bd > 30){
+    if(!best){
+      GEO.state = 'error'; GEO.label = '포인트 없음';
+    }else if(auto && bd > 30){
+      // 부팅 시 자동 선택은 30km 안쪽일 때만 한다. 멀리 있는데 선택을 가로채면
+      // 보고 있던 포인트가 이유 없이 바뀐다.
       GEO.state = 'far';
-      GEO.label = best ? `${best.name} ${Math.round(bd)}km` : '';
+      GEO.label = `${best.name} ${Math.round(bd)}km`;
     }else{
+      // 직접 누른 것은 명시적 의사표시다. 멀어도 그 포인트로 옮긴다 —
+      // 거리만 알려주고 아무것도 안 하면 버튼이 고장난 것처럼 보인다.
       S.pt = best.id;
       if(S.mode === 'region') S.sea = best.sea;
       GEO.state = 'ok';

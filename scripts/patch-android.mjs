@@ -108,13 +108,23 @@ edit('app/src/main/AndroidManifest.xml', '세로 고정 · COARSE 위치만 · c
     s = s.replace('<activity', '<activity\n            android:screenOrientation="portrait"');
   }
 
-  // 최근접 포인트만 고르면 되므로 대략 위치로 충분하다.
-  // Geolocation 플러그인이 병합하는 ACCESS_FINE_LOCATION 을 걷어낸다.
-  if (!s.includes('ACCESS_FINE_LOCATION')) {
+  // 위치 권한.
+  //
+  // 처음에는 정밀 위치가 필요 없다는 이유로 ACCESS_FINE_LOCATION 을
+  // tools:node="remove" 로 걷어냈는데, 그러면 기능이 아예 죽는다.
+  // Geolocation 플러그인의 'location' 별칭은 COARSE+FINE 을 함께 요청하고,
+  // 선언되지 않은 권한을 요청하면 Android 는 대화상자조차 띄우지 않고
+  // 즉시 거부를 돌려준다. 사용자에게는 "권한 없음"만 보인다.
+  //
+  // 그래서 둘 다 선언한다. Android 12+ 는 시스템 대화상자에서 사용자가
+  // '대략적인 위치'를 직접 고를 수 있고, 앱은 enableHighAccuracy:false 로
+  // 요청하므로 대략 위치만 허용해도 최근접 포인트 선택에 지장이 없다.
+  // 정밀도를 우리가 막는 것보다 사용자가 고르게 두는 편이 낫다.
+  if (!s.includes('ACCESS_COARSE_LOCATION')) {
     need(s, '</manifest>', '매니페스트 닫는 태그');
     s = s.replace('</manifest>',
-      `    <!-- 정밀 위치는 쓰지 않는다. 41개 포인트 중 최근접만 고르면 되므로 대략 위치로 충분하다. -->
-    <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" tools:node="remove" />
+      `    <!-- 최근접 포인트 자동 선택용. 거부해도 앱은 정상 동작한다. -->
+    <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
 
 </manifest>`);
   }

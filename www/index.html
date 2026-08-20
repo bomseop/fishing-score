@@ -1145,9 +1145,18 @@ const kmBetween = (a,b) =>
 
 async function currentPos(){
   if(NATIVE && CAP.Geolocation){
-    const perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
-    if(!perm || perm.location === 'prompt' || perm.location === 'prompt-with-rationale'){
-      await CAP.Geolocation.requestPermissions({permissions:['location']}).catch(()=>null);
+    let perm = await CAP.Geolocation.checkPermissions().catch(()=>null);
+    const need = !perm || perm.location === 'prompt' || perm.location === 'prompt-with-rationale'
+                       || perm.location === 'denied';
+    if(need){
+      // 대략 위치만으로 충분하므로 그쪽을 먼저 청한다. 별칭을 모르는 버전이면
+      // 예외가 나므로 표준 'location' 으로 물러선다.
+      perm = await CAP.Geolocation.requestPermissions({permissions:['coarseLocation']})
+                  .catch(()=> CAP.Geolocation.requestPermissions({permissions:['location']})
+                                  .catch(()=>null));
+    }
+    if(perm && perm.location === 'denied' && perm.coarseLocation === 'denied'){
+      const e = new Error('denied'); e.denied = true; throw e;
     }
     const p = await CAP.Geolocation.getCurrentPosition(
       {enableHighAccuracy:false, timeout:9000, maximumAge:300000});
@@ -1211,7 +1220,7 @@ function drawToolbar(){
   const geoTxt = GEO.state === 'busy'   ? '위치 확인중'
                : GEO.state === 'ok'     ? GEO.label
                : GEO.state === 'far'    ? `30km 밖 · ${GEO.label}`
-               : GEO.state === 'denied' ? '위치 권한 없음'
+               : GEO.state === 'denied' ? '위치 거부됨 · 설정에서 허용'
                : '내 위치';
   const ver = VER.latest
     ? `<a class="tver up" href="${VER.url}" target="_blank" rel="noopener">v${VER.current} → v${VER.latest}</a>`
